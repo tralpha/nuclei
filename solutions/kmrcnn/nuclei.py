@@ -123,11 +123,9 @@ class NucleiDataset(utils.Dataset):
         """Load the specified image and return a [H,W,3] Numpy array.
         """
         # Load image
-        if isinstance(image_id, int):
-            image = skimage.io.imread(self.image_info[image_id]['path'])
-        else:
-            im_id = self.real_to_id[image_id]
-            image = skimage.io.imread(self.image_info[im_id]['path'])
+        if not isinstance(image_id, int):
+            image_id = self.real_to_id[image_id]
+        image = skimage.io.imread(self.image_info[image_id]['path'])
         # If grayscale. Convert to RGB for consistency.
         if remove_alpha == True and image.shape[-1] != 3:
             # print("Image {} has a shape of {}".format(image_id, image.shape))
@@ -152,7 +150,9 @@ class NucleiDataset(utils.Dataset):
             one mask per instance.
         class_ids: a 1D array of class IDs of the instance masks.
         """
-        image = self.load_image(image_id)
+        if not isinstance(image_id, int):
+            image_id = self.real_to_id[str(image_id)]
+        image = skimage.io.imread(self.image_info[image_id]['path'])
         mask_path = os.path.join(self.image_info[image_id]['m_path'])
         instance_masks = []
         class_ids = []
