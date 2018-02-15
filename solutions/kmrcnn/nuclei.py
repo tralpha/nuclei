@@ -108,19 +108,26 @@ class NucleiDataset(utils.Dataset):
         image_ids = next(os.walk(image_dir))[1]
         
         # Add Images
-        for i in image_ids:
+        self.real_to_id = {}
+        for idx,i in enumerate(image_ids):
             i_path = os.path.join(image_dir, i,'images',i+'.png')
             m_path = os.path.join(image_dir, i, 'masks')
             self.add_image(
             "nuclei", image_id=i,
             path=i_path,
             m_path=m_path)
+            self.real_to_id[i] = idx
+
                 
     def load_image(self, image_id, remove_alpha=True):
         """Load the specified image and return a [H,W,3] Numpy array.
         """
         # Load image
-        image = skimage.io.imread(self.image_info[image_id]['path'])
+        if isinstance(image_id, int):
+            image = skimage.io.imread(self.image_info[image_id]['path'])
+        else:
+            im_id = self.real_to_id[image_id]
+            image = skimage.io.imread(self.image_info[im_id]['path'])
         # If grayscale. Convert to RGB for consistency.
         if remove_alpha == True and image.shape[-1] != 3:
             # print("Image {} has a shape of {}".format(image_id, image.shape))
