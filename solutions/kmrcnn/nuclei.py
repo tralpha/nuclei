@@ -25,12 +25,15 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
 import os
 import time
 import numpy as np
+import pandas as pd
 
 from config import Config
 import utils
 import model as modellib
 import skimage
-
+import copy
+from sklearn.model_selection import StratifiedShuffleSplit
+from IPython.core.debugger import set_trace
 
 ############################################################
 #  Configurations
@@ -64,7 +67,7 @@ class NucleiConfig(Config):
     # few objects. Aim to allow ROI sampling to pick 33% positive ROIs.
     TRAIN_ROIS_PER_IMAGE = 512
 
-     # Number of training steps per epoch
+    # Number of training steps per epoch
     # This doesn't need to match the size of the training set. Tensorboard
     # updates are saved at the end of each epoch, so setting this to a
     # smaller number means getting more frequent TensorBoard updates.
@@ -77,15 +80,15 @@ class NucleiConfig(Config):
     # A bigger number improves accuracy of validation stats, but slows
     # down the training.
     VALIDATION_STEPS = 50
-    
+
     # MEAN_PIXEL = [43.53287505, 39.56061986, 48.22454996, 255.]
     MEAN_PIXEL = [44.57284587, 40.71265898, 48.6901747]
-    
+
     # If enabled, resizes instance masks to a smaller size to reduce
     # memory load. Recommended when using high-resolution images.
     USE_MINI_MASK = True
     MINI_MASK_SHAPE = (56, 56)
-    
+
 
 ############################################################
 #  Dataset
@@ -93,55 +96,56 @@ class NucleiConfig(Config):
 
 
 class NucleiDataset(utils.Dataset):
-    def load_nuclei(self, dataset_dir, subset):
+    def load_nuclei(self,
+                    dataset_dir="../../input",
+                    subset="train",
+                    image_ids=None):
         """Load a subset of the nuclei dataset.
         dataset_dir: The root directory of the nuclei dataset.
         subset: What to load (train, test)
-        return_coco: If True, returns the COCO object.
-        auto_download: Automatically download and unzip MS-COCO images and annotations
+        image_ids: load these image_ids instead of walking the repo
         """
         # Add Classes
+        # assert image_ids and subset == "train"
         self.add_class("nuclei", 1, "nu")
-        
+
         image_dir = "{}/stage1_{}".format(dataset_dir, subset)
-        
-        image_ids = next(os.walk(image_dir))[1]
-        
+
+        if image_ids is not None:
+            assert subset == "train", "Build train & val from train set"
+            image_ids = image_ids
+        else:
+            image_ids = next(os.walk(image_dir))[1]
+        # set_trace()
         # Add Images
         self.real_to_id = {}
-        for idx,i in enumerate(image_ids):
-            i_path = os.path.join(image_dir, i,'images',i+'.png')
+        for idx, i in enumerate(image_ids):
+            i_path = os.path.join(image_dir, i, 'images', i + '.png')
             m_path = os.path.join(image_dir, i, 'masks')
-            self.add_image(
-            "nuclei", image_id=i,
-            path=i_path,
-            m_path=m_path)
+            self.add_image("nuclei", image_id=i, path=i_path, m_path=m_path)
             self.real_to_id[i] = idx
 
-                
     def load_image(self, image_id, remove_alpha=True):
         """Load the specified image and return a [H,W,3] Numpy array.
         """
         # Load image
-        if not isinstance(image_id, int):
+        if isinstance(image_id, str):
             image_id = self.real_to_id[image_id]
         image = skimage.io.imread(self.image_info[image_id]['path'])
         # If grayscale. Convert to RGB for consistency.
         if remove_alpha == True and image.shape[-1] != 3:
             # print("Image {} has a shape of {}".format(image_id, image.shape))
             if image.shape[-1] == 4:
-                image = image[:,:,:3]
+                image = image[:, :, :3]
         if image.ndim != 3:
             print("Image dimension not 3")
             image = skimage.color.gray2rgb(image)
         return image
-        
-    
-    
+
     def load_mask(self, image_id):
         """Load instance masks for the given image.
 
-        Different datasets use different ways to store masks. This
+        Different dataset use different ways to store masks. This
         function converts the different mask format to one format
         in the form of a bitmap [height, width, instances].
 
@@ -150,8 +154,8 @@ class NucleiDataset(utils.Dataset):
             one mask per instance.
         class_ids: a 1D array of class IDs of the instance masks.
         """
-        if not isinstance(image_id, int):
-            image_id = self.real_to_id[str(image_id)]
+        if isinstance(image_id, str):
+            image_id = self.real_to_id[image_id]
         image = skimage.io.imread(self.image_info[image_id]['path'])
         mask_path = os.path.join(self.image_info[image_id]['m_path'])
         instance_masks = []
@@ -168,4 +172,73 @@ class NucleiDataset(utils.Dataset):
         mask = np.stack(instance_masks, axis=2)
         class_ids = np.array(class_ids, dtype=np.int32)
         return mask, class_ids
-        
+
+    def split_dataset(self, val_size):
+        """
+        Loads validation set from Allen's `classes.csv` file
+        Arguments:
+            val_size: the size of the validation set
+        returns:
+            dataset_val: the Validation dataset directly in the NucleiDataset format.
+            It should contain at least one image from the different experiment conditions.
+        """
+        cl_df = pd.read_csv('classes.csv')
+        cl_df['im_type'] = cl_df.foreground.str.cat(cl_df.background)
+        cl_df['filename'] = cl_df['filename'].apply(lambda x: x[:-4])
+        classes_count = cl_df.groupby(['im_type']).count()
+        # Obtain only from train set
+        train_ids = list(self.real_to_id)
+        # train_ids = [im + '.png' for im in self.real_to_id.keys()]
+        train_classes = cl_df.loc[np.where(
+            np.in1d(cl_df['filename'], train_ids))[0]]
+        test_classes = cl_df.loc[np.where(~np.in1d(cl_df['filename'],
+                                                   train_ids))[0]]
+        train_count = train_classes.groupby(['im_type']).count()
+        test_count = test_classes.groupby(['im_type']).count()
+        X, y = train_classes['filename'], train_classes['im_type']
+        sss = StratifiedShuffleSplit(
+            n_splits=1, test_size=val_size, random_state=0)
+        for train_index, val_index in sss.split(X, y):
+            # print("TRAIN:", train_index, "TEST:", test_index)
+            X_train, X_val = X.iloc[train_index], X.iloc[val_index]
+            y_train, y_val = y.iloc[train_index], y.iloc[val_index]
+        # train_classes = cl_df.loc[np.where(cl_df == train_ids)]
+        return X_train, X_val
+
+    def extract_train_val(self):
+        """Extracts the train and validation set images from the dataset
+
+        Returns:
+        dataset_train: The train dataset which is a NucleiDataset file
+        dataset_val: The val dataset which is a NucleiDataset file
+        """
+        train, val = self.split_dataset(0.2)
+        dataset_train = NucleiDataset()
+        dataset_val = NucleiDataset()
+        dataset_train.load_nuclei(image_ids=train) 
+        dataset_val.load_nuclei(image_ids=val) 
+        # dataset_val = NucleiDataset().load_nuclei(image_ids=val)
+        # set_trace()
+        return dataset_train, dataset_val
+        # dataset_train = copy.deepcopy(self)
+        # dataset_val = copy.deepcopy(self)
+        # datasets = {"train": [train, dataset_train], "val": [val, dataset_val]}
+        # real_ids = list(self.real_to_id.keys())
+        # for d in datasets:
+        #     d_bool = np.in1d([im + '.png' for im in real_ids], datasets[d][0])
+        #     datasets[d][1].image_info = []
+        #     datasets[d][1]._image_ids = []
+        #     datasets[d][1].real_to_id = {}
+        #     for idx, i in enumerate(d_bool):
+        #         if i:
+        #             real_id = real_ids[idx]
+        #             datasets[d][1].image_ids.append(idx)
+        #             img_info = {
+        #                 "source": "nuclei_" + d,
+        #                 "id": real_id,
+        #                 "path": self.image_info[idx]['path'],
+        #                 "m_path": self.image_info[idx]['m_path']
+        #             }
+        #             datasets[d][1].image_info.append(img_info)
+        #             datasets[d][1].real_to_id[real_id] = i
+        # return datasets
