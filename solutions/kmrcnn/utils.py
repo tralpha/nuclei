@@ -19,14 +19,15 @@ import skimage.io
 import urllib.request
 import shutil
 from skimage.morphology import label
+from skimage.transform import resize
 
 # URL from which to download the latest COCO trained weights
 COCO_MODEL_URL = "https://github.com/matterport/Mask_RCNN/releases/download/v2.0/mask_rcnn_coco.h5"
 
-
 ############################################################
 #  Bounding Boxes
 ############################################################
+
 
 def extract_bboxes(mask):
     """Compute bounding boxes from masks.
@@ -211,6 +212,7 @@ def box_refinement(box, gt_box):
 #  Dataset
 ############################################################
 
+
 class Dataset(object):
     """The base class for dataset classes.
     To use it, create a new class that adds functions specific to the dataset
@@ -272,6 +274,7 @@ class Dataset(object):
         TODO: class map is not supported yet. When done, it should handle mapping
               classes from different datasets to the same class ID.
         """
+
         def clean_name(name):
             """Returns a shorter version of object names for cleaner display."""
             return ",".join(name.split(",")[:1])
@@ -283,8 +286,10 @@ class Dataset(object):
         self.num_images = len(self.image_info)
         self._image_ids = np.arange(self.num_images)
 
-        self.class_from_source_map = {"{}.{}".format(info['source'], info['id']): id
-                                      for info, id in zip(self.class_info, self.class_ids)}
+        self.class_from_source_map = {
+            "{}.{}".format(info['source'], info['id']): id
+            for info, id in zip(self.class_info, self.class_ids)
+        }
 
         # Map sources to class_ids they support
         self.sources = list(set([i['source'] for i in self.class_info]))
@@ -398,8 +403,8 @@ def resize_image(image, min_dim=None, max_dim=None, padding=False):
             scale = max_dim / image_max
     # Resize image and mask
     if scale != 1:
-        image = scipy.misc.imresize(
-            image, (round(h * scale), round(w * scale)))
+        image = scipy.misc.imresize(image,
+                                    (round(h * scale), round(w * scale)))
     # Need padding?
     if padding:
         # Get new height and width
@@ -435,7 +440,7 @@ def minimize_mask(bbox, mask, mini_shape):
 
     See inspect_data.ipynb notebook for more details.
     """
-    mini_mask = np.zeros(mini_shape + (mask.shape[-1],), dtype=bool)
+    mini_mask = np.zeros(mini_shape + (mask.shape[-1], ), dtype=bool)
     for i in range(mask.shape[-1]):
         m = mask[:, :, i]
         y1, x1, y2, x2 = bbox[i][:4]
@@ -453,7 +458,7 @@ def expand_mask(bbox, mini_mask, image_shape):
 
     See inspect_data.ipynb notebook for more details.
     """
-    mask = np.zeros(image_shape[:2] + (mini_mask.shape[-1],), dtype=bool)
+    mask = np.zeros(image_shape[:2] + (mini_mask.shape[-1], ), dtype=bool)
     for i in range(mask.shape[-1]):
         m = mini_mask[:, :, i]
         y1, x1, y2, x2 = bbox[i][:4]
@@ -493,6 +498,7 @@ def unmold_mask(mask, bbox, image_shape):
 #  Anchors
 ############################################################
 
+
 def generate_anchors(scales, ratios, shape, feature_stride, anchor_stride):
     """
     scales: 1D array of anchor sizes in pixels. Example: [32, 64, 128]
@@ -527,8 +533,8 @@ def generate_anchors(scales, ratios, shape, feature_stride, anchor_stride):
     box_sizes = np.stack([box_heights, box_widths], axis=2).reshape([-1, 2])
 
     # Convert to corner coordinates (y1, x1, y2, x2)
-    boxes = np.concatenate([box_centers - 0.5 * box_sizes,
-                            box_centers + 0.5 * box_sizes], axis=1)
+    boxes = np.concatenate(
+        [box_centers - 0.5 * box_sizes, box_centers + 0.5 * box_sizes], axis=1)
     return boxes
 
 
@@ -547,14 +553,16 @@ def generate_pyramid_anchors(scales, ratios, feature_shapes, feature_strides,
     # [anchor_count, (y1, x1, y2, x2)]
     anchors = []
     for i in range(len(scales)):
-        anchors.append(generate_anchors(scales[i], ratios, feature_shapes[i],
-                                        feature_strides[i], anchor_stride))
+        anchors.append(
+            generate_anchors(scales[i], ratios, feature_shapes[i],
+                             feature_strides[i], anchor_stride))
     return np.concatenate(anchors, axis=0)
 
 
 ############################################################
 #  Miscellaneous
 ############################################################
+
 
 def trim_zeros(x):
     """It's common to have tensors larger than the available data and
@@ -566,8 +574,11 @@ def trim_zeros(x):
     return x[~np.all(x == 0, axis=1)]
 
 
-def compute_ap(gt_boxes, gt_class_ids,
-               pred_boxes, pred_class_ids, pred_scores,
+def compute_ap(gt_boxes,
+               gt_class_ids,
+               pred_boxes,
+               pred_class_ids,
+               pred_scores,
                iou_threshold=0.5):
     """Compute Average Precision at a set IoU threshold (default 0.5).
 
@@ -628,8 +639,8 @@ def compute_ap(gt_boxes, gt_class_ids,
 
     # Compute mean AP over recall range
     indices = np.where(recalls[:-1] != recalls[1:])[0] + 1
-    mAP = np.sum((recalls[indices] - recalls[indices - 1]) *
-                 precisions[indices])
+    mAP = np.sum(
+        (recalls[indices] - recalls[indices - 1]) * precisions[indices])
 
     return mAP, precisions, recalls, overlaps
 
@@ -688,8 +699,7 @@ def batch_slice(inputs, graph_fn, batch_size, names=None):
     if names is None:
         names = [None] * len(outputs)
 
-    result = [tf.stack(o, axis=0, name=n)
-              for o, n in zip(outputs, names)]
+    result = [tf.stack(o, axis=0, name=n) for o, n in zip(outputs, names)]
     if len(result) == 1:
         result = result[0]
 
@@ -703,7 +713,8 @@ def download_trained_weights(coco_model_path, verbose=1):
     """
     if verbose > 0:
         print("Downloading pretrained model to " + coco_model_path + " ...")
-    with urllib.request.urlopen(COCO_MODEL_URL) as resp, open(coco_model_path, 'wb') as out:
+    with urllib.request.urlopen(COCO_MODEL_URL) as resp, open(coco_model_path,
+                                                              'wb') as out:
         shutil.copyfileobj(resp, out)
     if verbose > 0:
         print("... done downloading pretrained model!")
@@ -712,7 +723,6 @@ def download_trained_weights(coco_model_path, verbose=1):
 ############################################################
 #  Data Science Bowl Functions
 ############################################################
-
 
 
 def iou_metric(y_true_in, y_pred_in, print_table=False):
@@ -728,21 +738,24 @@ def iou_metric(y_true_in, y_pred_in, print_table=False):
     n_gt_masks = y_true_in.shape[-1]
     n_pred_masks = y_pred_in.shape[-1]
 
-    for index in range(0,n_gt_masks):
-        labels[y_true_in[:,:,index] > 0] = index + 1
+    for index in range(0, n_gt_masks):
+        labels[y_true_in[:, :, index] > 0] = index + 1
 
-    for index in range(0,n_pred_masks):
-        y_pred[y_pred_in[:,:,index] > 0] = index + 1
+    for index in range(0, n_pred_masks):
+        y_pred[y_pred_in[:, :, index] > 0] = index + 1
 
-    
+    # set_trace()
+
     true_objects = len(np.unique(labels))
     pred_objects = len(np.unique(y_pred))
 
-    intersection = np.histogram2d(labels.flatten(), y_pred.flatten(), bins=(true_objects, pred_objects))[0]
+    intersection = np.histogram2d(
+        labels.flatten(), y_pred.flatten(), bins=(true_objects,
+                                                  pred_objects))[0]
 
     # Compute areas (needed for finding the union between all objects)
-    area_true = np.histogram(labels, bins = true_objects)[0]
-    area_pred = np.histogram(y_pred, bins = pred_objects)[0]
+    area_true = np.histogram(labels, bins=true_objects)[0]
+    area_pred = np.histogram(y_pred, bins=pred_objects)[0]
     area_true = np.expand_dims(area_true, -1)
     area_pred = np.expand_dims(area_pred, 0)
 
@@ -750,8 +763,8 @@ def iou_metric(y_true_in, y_pred_in, print_table=False):
     union = area_true + area_pred - intersection
 
     # Exclude background from the analysis
-    intersection = intersection[1:,1:]
-    union = union[1:,1:]
+    intersection = intersection[1:, 1:]
+    union = union[1:, 1:]
     union[union == 0] = 1e-9
 
     # Compute the intersection over union
@@ -760,10 +773,11 @@ def iou_metric(y_true_in, y_pred_in, print_table=False):
     # Precision helper function
     def precision_at(threshold, iou):
         matches = iou > threshold
-        true_positives = np.sum(matches, axis=1) == 1   # Correct objects
+        true_positives = np.sum(matches, axis=1) == 1  # Correct objects
         false_positives = np.sum(matches, axis=0) == 0  # Missed objects
         false_negatives = np.sum(matches, axis=1) == 0  # Extra objects
-        tp, fp, fn = np.sum(true_positives), np.sum(false_positives), np.sum(false_negatives)
+        tp, fp, fn = np.sum(true_positives), np.sum(false_positives), np.sum(
+            false_negatives)
         return tp, fp, fn
 
     # Loop over IoU thresholds
@@ -779,10 +793,11 @@ def iou_metric(y_true_in, y_pred_in, print_table=False):
         if print_table:
             print("{:1.3f}\t{}\t{}\t{}\t{:1.3f}".format(t, tp, fp, fn, p))
         prec.append(p)
-    
+
     if print_table:
         print("AP\t-\t-\t-\t{:1.3f}".format(np.mean(prec)))
     return np.mean(prec)
+
 
 def iou_metric_batch(y_true_in, y_pred_in):
     batch_size = y_true_in.shape[0]
@@ -792,6 +807,44 @@ def iou_metric_batch(y_true_in, y_pred_in):
         metric.append(value)
     return np.array(np.mean(metric), dtype=np.float32)
 
+
 def my_iou_metric(label, pred):
     metric_value = tf.py_func(iou_metric_batch, [label, pred], tf.float32)
     return metric_value
+
+
+def resh_to_orig(final_masks, image_meta, dataset=None):
+    """
+    Function takes an array of, and reshapes them to be the same as the 
+    original image size they came from
+    Args:
+        final_masks: An array of masks [N, height, width] which were predicted
+        gt_masks: The ground truth mask, which contains the image shape we'll 
+        like to predict.
+        imgage_meta: The image meta of the image we're trying to predict
+    Returns:
+        ron_masks: The predicted resized masks in range 0 - 1
+        o1_masks: The original image, in range 0 - 1
+    """
+    # Remove the pads
+    assert dataset is not None, "Provide dataset from which to load mask"
+    window = image_meta[4:8]
+    w_masks = final_masks[window[0]:window[2], window[1]:window[3], :]
+    im_shape = image_meta[1:4]
+    # Check whether the image is in 0 - 255 range or 0 - 1 range
+    im_max = w_masks.max()
+    if im_max == 255:
+        # Image is in 0 - 255 range, convert it to 0 - 1 range. won means 
+        # windowed one mask
+        w_masks = np.where(w_masks == 255, 1, 0)
+    # Resize mask. Be careful here. It might be where the error pops!
+    resized_masks = resize(
+        w_masks, (im_shape[0], im_shape[1]),
+        mode='constant',
+        preserve_range=True)
+    # ron_masks means resized one masks
+    ron_masks = np.where(resized_masks > 0.5, 1, 0).astype('uint8')
+    # Load the original image masks, and then put it in range 0 - 1
+    o_masks = dataset.load_mask(image_meta[0])[0]
+    o1_masks = np.where(o_masks == 255.0, 1, 0)
+    return ron_masks, o1_masks
