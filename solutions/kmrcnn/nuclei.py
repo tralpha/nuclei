@@ -63,8 +63,11 @@ class NucleiConfig(Config):
     # Use smaller anchors because our image and objects are small
     RPN_ANCHOR_SCALES = (16, 32, 64, 128, 256)  # anchor side in pixels
 
-    # Reduce training ROIs per image because the images are small and have
-    # few objects. Aim to allow ROI sampling to pick 33% positive ROIs.
+    # Number of ROIs per image to feed to classifier/mask heads
+    # The Mask RCNN paper uses 512 but often the RPN doesn't generate
+    # enough positive proposals to fill this and keep a positive:negative
+    # ratio of 1:3. You can increase the number of proposals by adjusting
+    # the RPN NMS threshold.
     TRAIN_ROIS_PER_IMAGE = 512
 
     # Number of training steps per epoch
@@ -74,12 +77,12 @@ class NucleiConfig(Config):
     # Validation stats are also calculated at each epoch end and they
     # might take a while, so don't set this too small to avoid spending
     # a lot of time on validation stats.
-    STEPS_PER_EPOCH = 1000
+    STEPS_PER_EPOCH = 34 // (IMAGES_PER_GPU * GPU_COUNT)
 
     # Number of validation steps to run at the end of every training epoch.
     # A bigger number improves accuracy of validation stats, but slows
     # down the training.
-    VALIDATION_STEPS = 50
+    VALIDATION_STEPS = 34 // (IMAGES_PER_GPU * GPU_COUNT)
 
     # MEAN_PIXEL = [43.53287505, 39.56061986, 48.22454996, 255.]
     MEAN_PIXEL = [44.57284587, 40.71265898, 48.6901747]
@@ -88,6 +91,17 @@ class NucleiConfig(Config):
     # memory load. Recommended when using high-resolution images.
     USE_MINI_MASK = True
     MINI_MASK_SHAPE = (56, 56)
+
+    # Learning rate and momentum
+    # The Mask RCNN paper uses lr=0.02, but on TensorFlow it causes
+    # weights to explode. Likely due to differences in optimzer
+    # implementation.
+    LEARNING_RATE = 0.001
+    LEARNING_MOMENTUM = 0.9
+
+    # Maximum number of ground truth instances to use in one image
+    MAX_GT_INSTANCES = 100
+
 
 
 ############################################################
@@ -123,7 +137,7 @@ class NucleiDataset(utils.Dataset):
             i_path = os.path.join(image_dir, i, 'images', i + '.png')
             m_path = os.path.join(image_dir, i, 'masks')
             self.add_image("nuclei", image_id=i, path=i_path, m_path=m_path)
-            self.real_to_id[i] = idx
+            self.real_to_id[i] = int(idx)
 
     def load_image(self, image_id, remove_alpha=True):
         """Load the specified image and return a [H,W,3] Numpy array.
@@ -212,11 +226,18 @@ class NucleiDataset(utils.Dataset):
         dataset_train: The train dataset which is a NucleiDataset file
         dataset_val: The val dataset which is a NucleiDataset file
         """
-        train, val = self.split_dataset(0.2)
+        train, val = self.split_dataset(0.05)
+        # set_trace()
+        # val = [
+        #     "4dbbb275960ab9e4ec2c66c8d3000f7c70c8dce5112df591b95db84e25efa6e9",
+        #     "12aeefb1b522b283819b12e4cfaf6b13c1264c0aadac3412b4edd2ace304cb40",
+        #     "3f9fc8e63f87e8a56d3eaef7db26f1b6db874d19f12abd5a752821b78d47661e",
+        #     "a90cad45551d62c5cfa89517df8eb5e8f2f87f1a6e6678e606907afcbad91731"
+        # ]
         dataset_train = NucleiDataset()
         dataset_val = NucleiDataset()
-        dataset_train.load_nuclei(image_ids=train) 
-        dataset_val.load_nuclei(image_ids=val) 
+        dataset_train.load_nuclei(image_ids=train)
+        dataset_val.load_nuclei(image_ids=val)
         # dataset_val = NucleiDataset().load_nuclei(image_ids=val)
         # set_trace()
         return dataset_train, dataset_val
