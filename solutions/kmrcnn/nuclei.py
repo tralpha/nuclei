@@ -51,7 +51,7 @@ class NucleiConfig(Config):
     # Train on 1 GPU and 8 images per GPU. We can put multiple images on each
     # GPU because the images are small. Batch size is 8 (GPUs * images/GPU).
     GPU_COUNT = 1
-    IMAGES_PER_GPU = 2
+    IMAGES_PER_GPU = 1
 
     # Number of classes (including background)
     NUM_CLASSES = 1 + 1  # background + 1 nuclei
@@ -90,18 +90,20 @@ class NucleiConfig(Config):
     # If enabled, resizes instance masks to a smaller size to reduce
     # memory load. Recommended when using high-resolution images.
     USE_MINI_MASK = True
-    MINI_MASK_SHAPE = (56, 56)
+    MINI_MASK_SHAPE = (224, 224)
 
     # Learning rate and momentum
     # The Mask RCNN paper uses lr=0.02, but on TensorFlow it causes
     # weights to explode. Likely due to differences in optimzer
     # implementation.
-    LEARNING_RATE = 0.001
+    LEARNING_RATE = 0.0001
     LEARNING_MOMENTUM = 0.9
 
     # Maximum number of ground truth instances to use in one image
-    MAX_GT_INSTANCES = 100
+    MAX_GT_INSTANCES = 400
 
+    # Max number of final detections
+    DETECTION_MAX_INSTANCES = 400
 
 
 ############################################################
@@ -131,13 +133,30 @@ class NucleiDataset(utils.Dataset):
         else:
             image_ids = next(os.walk(image_dir))[1]
         # set_trace()
-        # Add Images
+        # Data structure to hold read_id to index_id mapping
         self.real_to_id = {}
+        # Data structure to hold the double nuclei masks
+        self.dn_masks = {}
+        bad_masks = open("bad_masks", "r")
+        b_lines = bad_masks.readlines()
+        self.b_masks = (m for m in b_lines)
+        for b_mask in self.b_masks:
+            _, image_id, _, mask_id = b_mask.split("\\")
+            mask_id = mask_id[:-5]
+            self.dn_masks[mask_id] = image_id
+        # self.issues = {
+        #     'holes': [],
+        #     'nuclei_tgt': [{
+        #         "ef3ef194e5657fda708ecbd3eb6530286ed2ba23c88efb9f1715298975c73548":
+        #         "9d2eb605a9e1b87b213cf0d2a366e461049cac5942db4b1a40a967dd54417792"
+        #     },{} ]
+        # }
         for idx, i in enumerate(image_ids):
             i_path = os.path.join(image_dir, i, 'images', i + '.png')
             m_path = os.path.join(image_dir, i, 'masks')
             self.add_image("nuclei", image_id=i, path=i_path, m_path=m_path)
             self.real_to_id[i] = int(idx)
+        # set_trace()
 
     def load_image(self, image_id, remove_alpha=True):
         """Load the specified image and return a [H,W,3] Numpy array.
@@ -156,7 +175,7 @@ class NucleiDataset(utils.Dataset):
             image = skimage.color.gray2rgb(image)
         return image
 
-    def load_mask(self, image_id):
+    def load_mask(self, image_id, mask_id=None):
         """Load instance masks for the given image.
 
         Different dataset use different ways to store masks. This
@@ -170,11 +189,20 @@ class NucleiDataset(utils.Dataset):
         """
         if isinstance(image_id, str):
             image_id = self.real_to_id[image_id]
+        if mask_id:
+            m_path = os.path.join(self.image_info[image_id]['m_path'], mask_id)
+            mask = skimage.io.imread(m_path + '.png')
+            masks = mask[:, :, None]
+            class_id = np.array([1], dtype=np.int32)
+            return mask, class_id
         image = skimage.io.imread(self.image_info[image_id]['path'])
         mask_path = os.path.join(self.image_info[image_id]['m_path'])
         instance_masks = []
         class_ids = []
         for mask_file in next(os.walk(mask_path))[2]:
+            if mask_file[:-4] in self.dn_masks:
+                print("Found a double nuclei mask")
+                # Try to transform the double nuclei mask into multiple masks
             m = skimage.io.imread(os.path.join(mask_path, mask_file))
             instance_masks.append(m)
             class_ids.append(1)

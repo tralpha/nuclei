@@ -2425,23 +2425,25 @@ class MaskRCNN():
         kf = K.function(model.inputs, list(outputs.values()))
 
         # Run inference
-        molded_images, image_metas, windows = self.mold_inputs(images)
+        # molded_images, image_metas, windows = self.mold_inputs(images)
         # TODO: support training mode?
-        # if TEST_MODE == "training":
-        #     model_in = [molded_images, image_metas,
-        #                 target_rpn_match, target_rpn_bbox,
-        #                 gt_boxes, gt_masks]
-        #     if not config.USE_RPN_ROIS:
-        #         model_in.append(target_rois)
-        #     if model.uses_learning_phase and not isinstance(K.learning_phase(), int):
-        #         model_in.append(1.)
-        #     outputs_np = kf(model_in)
-        # else:
+        if self.mode == "training":
+            # model_in = [molded_images, image_metas,
+            #             target_rpn_match, target_rpn_bbox,
+            #             gt_class_ids, gt_boxes, gt_masks]
+            model_in = images
+            if not self.config.USE_RPN_ROIS:
+                model_in.append(target_rois)
+            if model.uses_learning_phase and not isinstance(K.learning_phase(), int):
+                model_in.append(1.)
+            outputs_np = kf(model_in)
+        else:
+            molded_images, image_metas, windows = self.mold_inputs(images)
 
-        model_in = [molded_images, image_metas]
-        if model.uses_learning_phase and not isinstance(K.learning_phase(), int):
-            model_in.append(0.)
-        outputs_np = kf(model_in)
+            model_in = [molded_images, image_metas]
+            if model.uses_learning_phase and not isinstance(K.learning_phase(), int):
+                model_in.append(0.)
+            outputs_np = kf(model_in)
 
         # Pack the generated Numpy arrays into a a dict and log the results.
         outputs_np = OrderedDict([(k, v)
