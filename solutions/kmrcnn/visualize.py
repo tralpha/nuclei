@@ -17,7 +17,7 @@ import matplotlib.patches as patches
 import matplotlib.lines as lines
 from matplotlib.patches import Polygon
 import IPython.display
-
+from IPython.core.debugger import set_trace
 import utils
 
 
@@ -233,11 +233,13 @@ def display_top_masks(image, mask, class_ids, class_names, limit=4):
     top_ids = [v[0] for v in sorted(zip(unique_class_ids, mask_area),
                                     key=lambda r: r[1], reverse=True) if v[1] > 0]
     # Generate images and titles
+    # set_trace()
     for i in range(limit):
         class_id = top_ids[i] if i < len(top_ids) else -1
         # Pull masks of instances belonging to the same class.
         m = mask[:, :, np.where(class_ids == class_id)[0]]
         m = np.sum(m * np.arange(1, m.shape[-1] + 1), -1)
+        # set_trace()
         to_display.append(m)
         titles.append(class_names[class_id] if class_id != -1 else "-")
     display_images(to_display, titles=titles, cols=limit + 1, cmap="Blues_r")

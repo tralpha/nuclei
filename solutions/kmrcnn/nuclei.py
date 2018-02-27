@@ -34,6 +34,7 @@ import skimage
 import copy
 from sklearn.model_selection import StratifiedShuffleSplit
 from IPython.core.debugger import set_trace
+from scipy import ndimage
 
 ############################################################
 #  Configurations
@@ -90,7 +91,7 @@ class NucleiConfig(Config):
     # If enabled, resizes instance masks to a smaller size to reduce
     # memory load. Recommended when using high-resolution images.
     USE_MINI_MASK = True
-    MINI_MASK_SHAPE = (224, 224)
+    MINI_MASK_SHAPE = (28, 28)
 
     # Learning rate and momentum
     # The Mask RCNN paper uses lr=0.02, but on TensorFlow it causes
@@ -175,7 +176,30 @@ class NucleiDataset(utils.Dataset):
             image = skimage.color.gray2rgb(image)
         return image
 
-    def load_mask(self, image_id, mask_id=None):
+    def separate_masks(self, mask_path, mask_file):
+        """
+        Function takes a mask file, and separates the masks contained in the 
+        image
+        Arguments:
+            mask_path: path to the file which contains the mask.
+            mask_file: file which contains the mask
+        Returns:
+            masks: A list of numpy arrays which contain each separated mask
+        """
+        mask = skimage.io.imread(os.path.join(mask_path + '_1', mask_file))
+        # set_trace()
+        labels, nlabels = ndimage.label(mask)
+        masks = []
+        class_ids = []
+        for label in range(1, nlabels + 1):
+            m = np.where(labels == label, 1, 0)
+            m = np.where(m == 1, 255, 0)
+            masks.append(m.astype('uint8'))
+            class_ids.append(1)
+        # set_trace()
+        return masks, class_ids
+
+    def load_mask(self, image_id, mask_id=None, m_correction=True):
         """Load instance masks for the given image.
 
         Different dataset use different ways to store masks. This
@@ -189,27 +213,39 @@ class NucleiDataset(utils.Dataset):
         """
         if isinstance(image_id, str):
             image_id = self.real_to_id[image_id]
-        if mask_id:
-            m_path = os.path.join(self.image_info[image_id]['m_path'], mask_id)
-            mask = skimage.io.imread(m_path + '.png')
-            masks = mask[:, :, None]
-            class_id = np.array([1], dtype=np.int32)
-            return mask, class_id
-        image = skimage.io.imread(self.image_info[image_id]['path'])
         mask_path = os.path.join(self.image_info[image_id]['m_path'])
+        if mask_id:
+            if m_correction:
+                mask, class_id = self.separate_masks(mask_path, mask_id)
+                # print(mask[1].shape)
+                # set_trace()
+                masks = np.stack(mask, axis=2)
+                class_id = np.array(class_id)
+            else:
+                m_path = os.path.join(mask_path, mask_id)
+                mask = skimage.io.imread(m_path)
+                masks = mask[:, :, None]
+                class_id = np.array([1], dtype=np.int32)
+            return masks, class_id
+        image = skimage.io.imread(self.image_info[image_id]['path'])
         instance_masks = []
         class_ids = []
         for mask_file in next(os.walk(mask_path))[2]:
-            if mask_file[:-4] in self.dn_masks:
-                print("Found a double nuclei mask")
+            if mask_file[:-4] in self.dn_masks and m_correction:
                 # Try to transform the double nuclei mask into multiple masks
-            m = skimage.io.imread(os.path.join(mask_path, mask_file))
-            instance_masks.append(m)
-            class_ids.append(1)
-            if m.shape[0] != image.shape[0] or m.shape[1] != image.shape[1]:
+                print("Found a double nuclei mask")
+                m, c_id = self.separate_masks(mask_path, mask_file)
+                # set_trace()
+            else:
+                m = [skimage.io.imread(os.path.join(mask_path, mask_file))]
+                c_id = [1]
+            instance_masks.extend(m)
+            class_ids.extend(c_id)
+            if m[0].shape[0] != image.shape[0] or m[0].shape[1] != image.shape[
+                    1]:
                 print("Mask and image have different shape for {}"
                       .format(image_id))
-            if m.max() < 1:
+            if m[0].max() < 1:
                 print("Mask {} has a zero area")
         mask = np.stack(instance_masks, axis=2)
         class_ids = np.array(class_ids, dtype=np.int32)
