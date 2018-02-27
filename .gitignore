@@ -1,1 +1,8 @@
 .DS_Store
+Mask_RCNN
+coco
+.ipynb_checkpoints
+__pycache__
+mask_rcnn_coco.h5
+logs
+tensorpack
