@@ -251,6 +251,37 @@ class NucleiDataset(utils.Dataset):
         class_ids = np.array(class_ids, dtype=np.int32)
         return mask, class_ids
 
+
+    def loop_over_masks(self, image_id, mask_id=None, m_correction=True):
+        """Loops over the different masks of an image. Attempt to identify
+        troublesome masks
+        Arguments:
+            image_id: The id of the image either in the form of a string or 
+            an integer
+            m_correction: Whether to load the correction of the mask or 
+            simply the original mask itself
+
+        Returns:
+        mask: This function is a generator, and it'll yield the masks one 
+        at the time
+        class_id: This is the class_id of the yielded mask
+        """
+        if isinstance(image_id, str):
+            image_id = self.real_to_id[image_id]
+        mask_path = os.path.join(self.image_info[image_id]['m_path'])
+        for mask_file in next(os.walk(mask_path))[2]:
+            if mask_file[:-4] in self.dn_masks and m_correction:
+                print("Found a double nuclei mask")
+                m, c_id = self.separate_masks(mask_path, mask_file)
+            else:
+                m = [skimage.io.imread(os.path.join(mask_path, mask_file))]
+                c_id = [1]
+            mask = np.stack(m, axis=2)
+            class_ids = np.array(c_id, dtype=np.int32)
+            yield mask, class_ids, mask_file
+
+
+
     def split_dataset(self, val_size):
         """
         Loads validation set from Allen's `classes.csv` file
