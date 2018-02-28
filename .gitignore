@@ -6,4 +6,10 @@ __pycache__
 mask_rcnn_coco.h5
 logs
 tensorpack
-solutions/kmrcnn/.ipynb_checkpoints/
+solutions/kmrcnn/.ipynb_checkpoints/inspect_nuclei_data-checkpoint.ipynb
+solutions/kmrcnn/__pycache__
+.*  # ignore all hidden files and folders
+!/.gitignore  # explicitly do not ignore .gitignore
+ExampleHuman/
+ExampleHuman.zip
+solutions/kmrcnn/__pycache__/config.cpython-36.pyc
