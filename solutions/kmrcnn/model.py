@@ -27,6 +27,7 @@ import keras.layers as KL
 import keras.initializers as KI
 import keras.engine as KE
 import keras.models as KM
+from IPython.core.debugger import set_trace
 
 import utils
 
@@ -260,6 +261,7 @@ class ProposalLayer(KE.Layer):
         # Improve performance by trimming to top anchors by score
         # and doing the rest on the smaller subset.
         pre_nms_limit = min(6000, self.anchors.shape[0])
+        
         ix = tf.nn.top_k(scores, pre_nms_limit, sorted=True,
                          name="top_anchors").indices
         scores = utils.batch_slice([scores, ix], lambda x, y: tf.gather(x, y),
@@ -304,6 +306,7 @@ class ProposalLayer(KE.Layer):
             return proposals
         proposals = utils.batch_slice([normalized_boxes, scores], nms,
                                       self.config.IMAGES_PER_GPU)
+        # set_trace()
         return proposals
 
     def compute_output_shape(self, input_shape):
@@ -356,6 +359,7 @@ class PyramidROIAlign(KE.Layer):
         y1, x1, y2, x2 = tf.split(boxes, 4, axis=2)
         h = y2 - y1
         w = x2 - x1
+
         # Equation 1 in the Feature Pyramid Networks paper. Account for
         # the fact that our coordinates are normalized here.
         # e.g. a 224x224 ROI (in pixels) maps to P4
@@ -874,6 +878,7 @@ def fpn_classifier_graph(rois, feature_maps,
     # Shape: [batch, num_boxes, pool_height, pool_width, channels]
     x = PyramidROIAlign([pool_size, pool_size], image_shape,
                         name="roi_align_classifier")([rois] + feature_maps)
+    # set_trace()
     # Two 1024 FC layers (implemented with Conv2D for consistency)
     x = KL.TimeDistributed(KL.Conv2D(1024, (pool_size, pool_size), padding="valid"),
                            name="mrcnn_class_conv1")(x)
@@ -923,7 +928,7 @@ def build_fpn_mask_graph(rois, feature_maps,
     # Shape: [batch, boxes, pool_height, pool_width, channels]
     x = PyramidROIAlign([pool_size, pool_size], image_shape,
                         name="roi_align_mask")([rois] + feature_maps)
-
+    set_trace()
     # Conv layers
     x = KL.TimeDistributed(KL.Conv2D(256, (3, 3), padding="same"),
                            name="mrcnn_mask_conv1")(x)
@@ -1815,6 +1820,7 @@ class MaskRCNN():
         mrcnn_feature_maps = [P2, P3, P4, P5]
 
         # Generate Anchors
+        # self.anchors = 
         self.anchors = utils.generate_pyramid_anchors(config.RPN_ANCHOR_SCALES,
                                                       config.RPN_ANCHOR_RATIOS,
                                                       config.BACKBONE_SHAPES,
@@ -1849,7 +1855,7 @@ class MaskRCNN():
                                  name="ROI",
                                  anchors=self.anchors,
                                  config=config)([rpn_class, rpn_bbox])
-
+        # set_trace()
         if mode == "training":
             # Class ID mask to mark class IDs supported by the dataset the image
             # came from.
@@ -1893,6 +1899,7 @@ class MaskRCNN():
                 [input_rpn_match, rpn_class_logits])
             rpn_bbox_loss = KL.Lambda(lambda x: rpn_bbox_loss_graph(config, *x), name="rpn_bbox_loss")(
                 [input_rpn_bbox, input_rpn_match, rpn_bbox])
+            set_trace()
             class_loss = KL.Lambda(lambda x: mrcnn_class_loss_graph(*x), name="mrcnn_class_loss")(
                 [target_class_ids, mrcnn_class_logits, active_class_ids])
             bbox_loss = KL.Lambda(lambda x: mrcnn_bbox_loss_graph(*x), name="mrcnn_bbox_loss")(
@@ -1928,6 +1935,7 @@ class MaskRCNN():
             h, w = config.IMAGE_SHAPE[:2]
             detection_boxes = KL.Lambda(
                 lambda x: x[..., :4] / np.array([h, w, h, w]))(detections)
+            set_trace()
 
             # Create masks for detections
             mrcnn_mask = build_fpn_mask_graph(detection_boxes, mrcnn_feature_maps,
