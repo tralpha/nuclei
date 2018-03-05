@@ -254,7 +254,7 @@ def conv_block(input_tensor,
     return x
 
 
-def resnet_graph(input_image, architecture, stage5=False, use_resnext=True):
+def resnet_graph(input_image, architecture, stage5=False, use_resnext=False):
     assert architecture in ["resnet50", "resnet101"]
     cardinality = 32 if use_resnext else 1
     # Stage 1
@@ -551,6 +551,7 @@ class PyramidROIAlign(KE.Layer):
             # Stop gradient propogation to ROI proposals
             level_boxes = tf.stop_gradient(level_boxes)
             box_indices = tf.stop_gradient(box_indices)
+            # set_trace()
 
             # Crop and Resize
             # From Mask R-CNN paper: "We sample four regular locations, so
@@ -568,6 +569,7 @@ class PyramidROIAlign(KE.Layer):
                     box_indices,
                     self.pool_shape,
                     method="bilinear"))
+            # set_trace()
 
         # Pack pooled features into one tensor
         pooled = tf.concat(pooled, axis=0)
@@ -2234,7 +2236,7 @@ class MaskRCNN():
                 lambda x: x[..., :4] / K.stack([h, w, h, w]))(detections)
 
             # Create masks for detections
-            set_trace()
+            # set_trace()
             mrcnn_mask = build_fpn_mask_graph(
                 detection_boxes, mrcnn_feature_maps, input_image,
                 config.MASK_POOL_SIZE, config.NUM_CLASSES)
@@ -2558,15 +2560,17 @@ class MaskRCNN():
         for image in images:
             # Resize image to fit the model expected size
             # TODO: move resizing to mold_image()
-            molded_image, window, scale, padding = utils.resize_image(
-                image,
-                min_dim=self.config.IMAGE_MIN_DIM,
-                max_dim=self.config.IMAGE_MAX_DIM,
-                padding=self.config.IMAGE_PADDING)
-            molded_image = mold_image(molded_image, self.config)
+            # molded_image, window, scale, padding = utils.resize_image(
+            #     image,
+            #     min_dim=self.config.IMAGE_MIN_DIM,
+            #     max_dim=self.config.IMAGE_MAX_DIM,
+            #     padding=self.config.IMAGE_PADDING)
+            molded_image = mold_image(image, self.config)
+            # set_trace()
             # Build image_meta
+            window = [0, 0, image.shape[0], image.shape[1]]
             image_meta = compose_image_meta(
-                0, image.shape, window,
+                0, image.shape,
                 np.zeros([self.config.NUM_CLASSES], dtype=np.int32))
             # Append
             molded_images.append(molded_image)
@@ -2576,6 +2580,7 @@ class MaskRCNN():
         molded_images = np.stack(molded_images)
         image_metas = np.stack(image_metas)
         windows = np.stack(windows)
+        # set_trace()
         return molded_images, image_metas, windows
 
     def unmold_detections(self, detections, mrcnn_mask, image_shape, window):
@@ -2664,11 +2669,19 @@ class MaskRCNN():
         if verbose:
             log("molded_images", molded_images)
             log("image_metas", image_metas)
+        rpn_anchors = utils.generate_pyramid_anchors(
+            molded_images.shape[1:], self.config.RPN_ANCHOR_SCALES,
+            self.config.RPN_ANCHOR_RATIOS, self.config.BACKBONE_STRIDES,
+            self.config.RPN_ANCHOR_STRIDE)
+        rpn_anchors = rpn_anchors[None,:,:]
+
         # Run object detection
         detections, mrcnn_class, mrcnn_bbox, mrcnn_mask, \
             rois, rpn_class, rpn_bbox =\
-            self.keras_model.predict([molded_images, image_metas], verbose=0)
+            self.keras_model.predict([molded_images, image_metas, rpn_anchors], 
+                verbose=0)
         # Process detections
+        # set_trace()
         results = []
         for i, image in enumerate(images):
             final_rois, final_class_ids, final_scores, final_masks =\
