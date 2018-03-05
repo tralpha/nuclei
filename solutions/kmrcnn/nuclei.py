@@ -62,7 +62,7 @@ class NucleiConfig(Config):
     IMAGE_MAX_DIM = 1024
 
     # Use smaller anchors because our image and objects are small
-    RPN_ANCHOR_SCALES = (16, 32, 64, 128, 256)  # anchor side in pixels
+    RPN_ANCHOR_SCALES = (8, 16, 32, 64, 128)  # anchor side in pixels
 
     # Number of ROIs per image to feed to classifier/mask heads
     # The Mask RCNN paper uses 512 but often the RPN doesn't generate
@@ -90,7 +90,7 @@ class NucleiConfig(Config):
 
     # If enabled, resizes instance masks to a smaller size to reduce
     # memory load. Recommended when using high-resolution images.
-    USE_MINI_MASK = True
+    USE_MINI_MASK = False
     MINI_MASK_SHAPE = (28, 28)
 
     # Learning rate and momentum
