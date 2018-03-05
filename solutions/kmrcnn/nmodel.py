@@ -1859,17 +1859,18 @@ def data_generator(dataset,
                 batch_images = np.zeros(
                     (batch_size, ) + image.shape, dtype=np.float32)
                 batch_gt_class_ids = np.zeros(
-                    (batch_size, config.MAX_GT_INSTANCES), dtype=np.int32)
+                    (batch_size, gt_masks.shape[-1]), dtype=np.int32)
                 batch_gt_boxes = np.zeros(
-                    (batch_size, config.MAX_GT_INSTANCES, 4), dtype=np.int32)
+                    (batch_size, gt_masks.shape[-1], 4), dtype=np.int32)
                 if config.USE_MINI_MASK:
                     batch_gt_masks = np.zeros(
                         (batch_size, config.MINI_MASK_SHAPE[0],
-                         config.MINI_MASK_SHAPE[1], config.MAX_GT_INSTANCES))
+                         config.MINI_MASK_SHAPE[1], gt_masks.shape[-1]))
                 else:
                     batch_gt_masks = np.zeros(
                         (batch_size, image.shape[0], image.shape[1],
-                         config.MAX_GT_INSTANCES))
+                         gt_masks.shape[-1]))
+                    # set_trace()
                 if random_rois:
                     batch_rpn_rois = np.zeros(
                         (batch_size, rpn_rois.shape[0], 4),
@@ -1889,6 +1890,7 @@ def data_generator(dataset,
 
             # If more instances than fits in the array, sub-sample from them.
             if gt_boxes.shape[0] > config.MAX_GT_INSTANCES:
+                print("This shouldn't happen")
                 ids = np.random.choice(
                     np.arange(gt_boxes.shape[0]),
                     config.MAX_GT_INSTANCES,
