@@ -58,8 +58,8 @@ class NucleiConfig(Config):
     NUM_CLASSES = 1 + 1  # background + 1 nuclei
 
     # Image Dimensions
-    IMAGE_MIN_DIM = 1600
-    IMAGE_MAX_DIM = 2048
+    IMAGE_MIN_DIM = 1200
+    IMAGE_MAX_DIM = 1536
 
     # Use smaller anchors because our image and objects are small
     RPN_ANCHOR_SCALES = (8, 16, 32, 64, 128)  # anchor side in pixels

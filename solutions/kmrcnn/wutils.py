@@ -842,9 +842,9 @@ def resh_to_orig(final_masks, image_meta, dataset=None):
         w_masks, (im_shape[0], im_shape[1]),
         mode='constant',
         preserve_range=True)
-    # ron_masks means resized one masks
-    ron_masks = np.where(resized_masks > 0.5, 1, 0).astype('uint8')
+    # rone_masks means resized one masks
+    rone_masks = np.where(resized_masks > 0.5, 1, 0).astype('uint8')
     # Load the original image masks, and then put it in range 0 - 1
     o_masks = dataset.load_mask(image_meta[0])[0]
     o1_masks = np.where(o_masks == 255.0, 1, 0)
-    return ron_masks, o1_masks
+    return rone_masks, o1_masks
