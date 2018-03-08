@@ -234,6 +234,7 @@ class NucleiDataset(utils.Dataset):
             if mask_file[:-4] in self.dn_masks and m_correction:
                 # Try to transform the double nuclei mask into multiple masks
                 print("Found a double nuclei mask")
+                print(mask_file)
                 m, c_id = self.separate_masks(mask_path, mask_file)
                 # set_trace()
             else:
@@ -358,3 +359,50 @@ class NucleiDataset(utils.Dataset):
         #             datasets[d][1].image_info.append(img_info)
         #             datasets[d][1].real_to_id[real_id] = i
         # return datasets
+
+
+    def calc_mask_sizes(self):
+        """Calculates the sizes of all the masks in the dataset
+
+        Returns:
+        mask_sizes: An array containing the sizes of the bounding boxes
+        of the masks
+        """
+        m_sizes = []
+        for im_id in range(len(self.image_ids)):
+            masks, class_ids = self.load_mask(im_id, m_correction=True)
+            boxes = utils.extract_bboxes(masks)
+            m_widths = boxes[:,2] - boxes[:,0]
+            m_heights = boxes[:,3] - boxes[:,1]
+            assert (m_widths>0).all(), "You got some negative widths"
+            assert (m_heights>0).all(), "You got some negative heights"
+            m_size = np.stack((m_widths, m_heights),axis=1)
+            m_sizes.append(m_size)
+        mask_sizes = np.vstack(m_sizes)
+        # Functions to plot the sizes
+        # import seaborn as sns
+        # sns.regplot(x=m_sizes[:,0],y=m_sizes[:,1],fit_reg=False)
+        # sns.jointplot(x=m_sizes[:,0], y=m_sizes[:,1], kind="kde")
+        return mask_sizes
+
+
+    def calc_im_sizes(self):
+        """Calculates the sizes of all the masks in the dataset
+
+        Returns:
+        mask_sizes: An array containing the sizes of the bounding boxes
+        of the masks
+        """
+        im_sizes = []
+        for im_id in range(len(self.image_ids)):
+            # masks, class_ids = self.load_mask(im_id, m_correction=True)
+            image = self.load_image(im_id)
+            im_sizes.append(image.shape[:-1])
+        im_sizes = np.vstack(im_sizes)
+        # Functions to plot the sizes
+        # import seaborn as sns
+        # sns.regplot(x=m_sizes[:,0],y=m_sizes[:,1],fit_reg=False)
+        # sns.jointplot(x=m_sizes[:,0], y=m_sizes[:,1], kind="kde")
+        return im_sizes
+
+
