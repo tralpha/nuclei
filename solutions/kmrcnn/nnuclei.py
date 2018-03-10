@@ -62,8 +62,8 @@ class NucleiConfig(Config):
     NUM_CLASSES = 1 + 1  # background + 1 nuclei
 
     # Image Dimensions
-    IMAGE_MIN_DIM = 400
-    IMAGE_MAX_DIM = 400
+    IMAGE_MIN_DIM = 1024
+    IMAGE_MAX_DIM = 1024
 
     # Use smaller anchors because our image and objects are small
     RPN_ANCHOR_SCALES = (8, 16, 32, 64, 128)  # anchor side in pixels
@@ -82,19 +82,19 @@ class NucleiConfig(Config):
     # Validation stats are also calculated at each epoch end and they
     # might take a while, so don't set this too small to avoid spending
     # a lot of time on validation stats.
-    STEPS_PER_EPOCH = 34 // (IMAGES_PER_GPU * GPU_COUNT)
+    STEPS_PER_EPOCH = 533 // (IMAGES_PER_GPU * GPU_COUNT)
 
     # Number of validation steps to run at the end of every training epoch.
     # A bigger number improves accuracy of validation stats, but slows
     # down the training.
-    VALIDATION_STEPS = 34 // (IMAGES_PER_GPU * GPU_COUNT)
+    VALIDATION_STEPS = 134 // (IMAGES_PER_GPU * GPU_COUNT)
 
     # MEAN_PIXEL = [43.53287505, 39.56061986, 48.22454996, 255.]
     MEAN_PIXEL = [44.57284587, 40.71265898, 48.6901747]
 
     # If enabled, resizes instance masks to a smaller size to reduce
     # memory load. Recommended when using high-resolution images.
-    USE_MINI_MASK = True
+    USE_MINI_MASK = False
     MINI_MASK_SHAPE = (28, 28)
 
     # Learning rate and momentum
@@ -207,6 +207,11 @@ class NucleiDataset(utils.Dataset):
                 class_ids = [1 for n_m_id in new_mask_ids]
                 return masks, class_ids
         # set_trace()
+        # if mask_file == "9790898c3892ac0b92a08b9f878f344333023374b7464ee571b0010b98dacc51.png": set_trace()
+        if mask.ndim == 3:
+            print("Very weird, found a 3D Mask for {}. We'll reshape it".
+                  format(mask_file))
+            mask = mask[:,:,0]
         labels, nlabels = ndimage.label(mask)
         masks = []
         class_ids = []
@@ -252,8 +257,8 @@ class NucleiDataset(utils.Dataset):
         for mask_file in next(os.walk(mask_path))[2]:
             if mask_file[:-4] in self.dn_masks and m_correction:
                 # Try to transform the double nuclei mask into multiple masks
-                print("Found a double nuclei mask")
-                print(mask_file)
+                # print("Found a double nuclei mask")
+                # print(mask_file)
                 m, c_id = self.separate_masks(mask_path, mask_file)
                 # set_trace()
             else:
