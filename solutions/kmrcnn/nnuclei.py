@@ -26,6 +26,7 @@ import os
 import time
 import numpy as np
 import pandas as pd
+import glob
 
 from config import Config
 import utils
@@ -134,6 +135,7 @@ class NucleiDataset(utils.Dataset):
         if image_ids is not None:
             assert subset == "train", "Build train & val from train set"
             image_ids = image_ids
+            image_ids = [iid for iid in image_ids]
         else:
             image_ids = next(os.walk(image_dir))[1]
         # set_trace()
@@ -145,13 +147,16 @@ class NucleiDataset(utils.Dataset):
         ex_images = open("ex_images", "r")
         b_lines = bad_masks.readlines()
         ex_lines = ex_images.readlines()
+        for ex_im in ex_lines:
+            if ex_im[:-1] in image_ids:
+                image_ids.remove(ex_im[:-1])
+        # set_trace()
         self.b_masks = (m for m in b_lines)
         for b_mask in self.b_masks:
             _, image_id, _, mask_id = b_mask.split("\\")
             mask_id = mask_id[:-5]
             self.dn_masks[mask_id] = image_id
         for idx, i in enumerate(image_ids):
-            if i+"\n" in ex_lines: continue
             i_path = os.path.join(image_dir, i, 'images', i + '.png')
             m_path = os.path.join(image_dir, i, 'masks')
             self.add_image("nuclei", image_id=i, path=i_path, m_path=m_path)
@@ -164,6 +169,7 @@ class NucleiDataset(utils.Dataset):
         # Load image
         if isinstance(image_id, str):
             image_id = self.real_to_id[image_id]
+            # set_trace()
         image = skimage.io.imread(self.image_info[image_id]['path'])
         # If grayscale. Convert to RGB for consistency.
         if remove_alpha == True and image.shape[-1] != 3:
@@ -185,7 +191,21 @@ class NucleiDataset(utils.Dataset):
         Returns:
             masks: A list of numpy arrays which contain each separated mask
         """
-        mask = skimage.io.imread(os.path.join(mask_path + '_1', mask_file))
+        new_masks_path = os.path.join(mask_path + '_1')
+        if os.path.exists(new_masks_path):
+            new_mask_path = os.path.join(mask_path + '_1', mask_file)
+            if os.path.exists(new_mask_path):
+                mask = skimage.io.imread(
+                    os.path.join(mask_path + '_1', mask_file))
+            else:
+                print("Using Lopuhin's corrections for {}".format(mask_file))
+                mask_id = mask_file.split(".")[0]
+                new_mask_ids = glob.glob(
+                    os.path.join(new_masks_path, mask_id + "*"))
+                # set_trace()
+                masks = [skimage.io.imread(n_m_id) for n_m_id in new_mask_ids]
+                class_ids = [1 for n_m_id in new_mask_ids]
+                return masks, class_ids
         # set_trace()
         labels, nlabels = ndimage.label(mask)
         masks = []
@@ -301,15 +321,15 @@ class NucleiDataset(utils.Dataset):
         """
         gimage = inverse_gaussian_gradient(mask)
         init_ls = np.zeros(mask.shape, dtype=np.int8)
-        height_pixels, width_pixels = np.where(mask==255)
+        height_pixels, width_pixels = np.where(mask == 255)
         min_height = height_pixels.min()
         max_height = height_pixels.max()
         min_width = width_pixels.min()
         max_width = width_pixels.max()
-        ls_h_start = np.minimum(min_height,10)
-        ls_h_end = np.maximum(max_height,mask.shape[0]-10)
-        ls_w_start = np.minimum(min_width,10)
-        ls_w_end = np.maximum(max_width,mask.shape[1]-10)
+        ls_h_start = np.minimum(min_height, 10)
+        ls_h_end = np.maximum(max_height, mask.shape[0] - 10)
+        ls_w_start = np.minimum(min_width, 10)
+        ls_w_end = np.maximum(max_width, mask.shape[1] - 10)
         init_ls[ls_h_start:ls_h_end, ls_w_start:ls_w_end] = 1
         gacig_mask = morphological_geodesic_active_contour(
             gimage.astype('float64'),
@@ -320,14 +340,13 @@ class NucleiDataset(utils.Dataset):
             threshold=0.69)
         return gacig_mask
 
-
     def create_gacm(self, mask, markers):
         """
         Function to create the random walker segmentation
         """
         mimage = skimage.filters.median(mask.astype(np.uint8))
-        mimage[mask==0] = 1
-        mimage[mask==255] = 0
+        mimage[mask == 0] = 1
+        mimage[mask == 255] = 0
         init_ls = np.zeros(mask.shape, dtype=np.int8)
         init_ls[10:-10, 10:-10] = 1
         gacig_mask = morphological_geodesic_active_contour(
@@ -338,7 +357,6 @@ class NucleiDataset(utils.Dataset):
             balloon=-1,
             threshold=0.5)
         return gacig_mask
-
 
     def base_watershed(self, new_mask, markers, mask_file):
         """
