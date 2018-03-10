@@ -35,6 +35,9 @@ import copy
 from sklearn.model_selection import StratifiedShuffleSplit
 from IPython.core.debugger import set_trace
 from scipy import ndimage
+import matplotlib.pyplot as plt
+from skimage.segmentation import (morphological_geodesic_active_contour,
+                                  inverse_gaussian_gradient)
 
 ############################################################
 #  Configurations
@@ -58,8 +61,8 @@ class NucleiConfig(Config):
     NUM_CLASSES = 1 + 1  # background + 1 nuclei
 
     # Image Dimensions
-    IMAGE_MIN_DIM = 800
-    IMAGE_MAX_DIM = 1024
+    IMAGE_MIN_DIM = 400
+    IMAGE_MAX_DIM = 400
 
     # Use smaller anchors because our image and objects are small
     RPN_ANCHOR_SCALES = (8, 16, 32, 64, 128)  # anchor side in pixels
@@ -90,14 +93,14 @@ class NucleiConfig(Config):
 
     # If enabled, resizes instance masks to a smaller size to reduce
     # memory load. Recommended when using high-resolution images.
-    USE_MINI_MASK = False
+    USE_MINI_MASK = True
     MINI_MASK_SHAPE = (28, 28)
 
     # Learning rate and momentum
     # The Mask RCNN paper uses lr=0.02, but on TensorFlow it causes
     # weights to explode. Likely due to differences in optimzer
     # implementation.
-    LEARNING_RATE = 0.0001
+    LEARNING_RATE = 0.001
     LEARNING_MOMENTUM = 0.9
 
     # Maximum number of ground truth instances to use in one image
@@ -139,20 +142,16 @@ class NucleiDataset(utils.Dataset):
         # Data structure to hold the double nuclei masks
         self.dn_masks = {}
         bad_masks = open("bad_masks", "r")
+        ex_images = open("ex_images", "r")
         b_lines = bad_masks.readlines()
+        ex_lines = ex_images.readlines()
         self.b_masks = (m for m in b_lines)
         for b_mask in self.b_masks:
             _, image_id, _, mask_id = b_mask.split("\\")
             mask_id = mask_id[:-5]
             self.dn_masks[mask_id] = image_id
-        # self.issues = {
-        #     'holes': [],
-        #     'nuclei_tgt': [{
-        #         "ef3ef194e5657fda708ecbd3eb6530286ed2ba23c88efb9f1715298975c73548":
-        #         "9d2eb605a9e1b87b213cf0d2a366e461049cac5942db4b1a40a967dd54417792"
-        #     },{} ]
-        # }
         for idx, i in enumerate(image_ids):
+            if i+"\n" in ex_lines: continue
             i_path = os.path.join(image_dir, i, 'images', i + '.png')
             m_path = os.path.join(image_dir, i, 'masks')
             self.add_image("nuclei", image_id=i, path=i_path, m_path=m_path)
@@ -252,7 +251,6 @@ class NucleiDataset(utils.Dataset):
         class_ids = np.array(class_ids, dtype=np.int32)
         return mask, class_ids
 
-
     def loop_over_masks(self, image_id, mask_id=None, m_correction=True):
         """Loops over the different masks of an image. Attempt to identify
         troublesome masks
@@ -281,7 +279,144 @@ class NucleiDataset(utils.Dataset):
             class_ids = np.array(c_id, dtype=np.int32)
             yield mask, class_ids, mask_file
 
+    def create_watershed(self, mask, markers):
+        """
+        Function to create the dilated image to feed the final
+        watershed function
+        """
+        dilated_mask = skimage.morphology.dilation(mask)
+        return dilated_mask
 
+    def create_rw(self, mask, markers):
+        """
+        Function to create the random walker segmentation
+        """
+        labels = skimage.segmentation.random_walker(mask, markers, mode='bf')
+        # dilated_mask = skimage.morphology.dilation(mask)
+        return labels
+
+    def create_gacig(self, mask, markers):
+        """
+        Function to create the random walker segmentation
+        """
+        gimage = inverse_gaussian_gradient(mask)
+        init_ls = np.zeros(mask.shape, dtype=np.int8)
+        height_pixels, width_pixels = np.where(mask==255)
+        min_height = height_pixels.min()
+        max_height = height_pixels.max()
+        min_width = width_pixels.min()
+        max_width = width_pixels.max()
+        ls_h_start = np.minimum(min_height,10)
+        ls_h_end = np.maximum(max_height,mask.shape[0]-10)
+        ls_w_start = np.minimum(min_width,10)
+        ls_w_end = np.maximum(max_width,mask.shape[1]-10)
+        init_ls[ls_h_start:ls_h_end, ls_w_start:ls_w_end] = 1
+        gacig_mask = morphological_geodesic_active_contour(
+            gimage.astype('float64'),
+            230,
+            init_ls,
+            smoothing=2,
+            balloon=-1,
+            threshold=0.69)
+        return gacig_mask
+
+
+    def create_gacm(self, mask, markers):
+        """
+        Function to create the random walker segmentation
+        """
+        mimage = skimage.filters.median(mask.astype(np.uint8))
+        mimage[mask==0] = 1
+        mimage[mask==255] = 0
+        init_ls = np.zeros(mask.shape, dtype=np.int8)
+        init_ls[10:-10, 10:-10] = 1
+        gacig_mask = morphological_geodesic_active_contour(
+            mimage.astype('float64'),
+            230,
+            init_ls,
+            smoothing=2,
+            balloon=-1,
+            threshold=0.5)
+        return gacig_mask
+
+
+    def base_watershed(self, new_mask, markers, mask_file):
+        """
+        Does a base watershed which is used by all other methodologies.
+        Final function in pipeline, so it saves the image too
+        """
+        base_marker = np.where(markers == 2)
+        # if new_mask[base_marker]
+        res = skimage.morphology.watershed(
+            new_mask, markers, compactness=0.0001)
+        res[res == 1] = 0
+        res[res == 2] = 255
+        res = res.astype(np.uint8)
+        skimage.io.imsave(mask_file, res)
+        return res
+
+    def base_markers(self, mask):
+        """
+        Function to create the markers to be used for watershed algorithm 
+        by all of the other segmentation methods
+        """
+        dist = ndimage.morphology.distance_transform_edt(mask)
+        max_pix = np.unravel_index(dist.argmax(), dist.shape)
+        markers = np.zeros_like(mask).astype(np.uint8)
+        # Check to see that there is no nuclei here in 0,0!
+        markers[0, 0] = 1
+        markers[max_pix[0], max_pix[1]] = 2
+        return markers
+
+    def new_masks(self, dataset_dir, subset="train"):
+        """
+        Function to create new masks just like Allen did
+        """
+        images_dir = "{}/stage1_{}".format(dataset_dir, subset)
+        image_ids = next(os.walk(images_dir))[1]
+        # Loop over all of the images
+        for image_id in image_ids:
+            mask_categories = {
+                'watershed_masks': {
+                    'present': False,
+                    'create_func': self.create_watershed
+                },
+                'rw_masks': {
+                    'present': False,
+                    'create_func': self.create_rw
+                },
+                # 'gacm_masks': {
+                #     'present': False,
+                #     'create_func': self.create_gacm,
+                # },
+                # 'gacig_masks': {
+                #     'present': False,
+                #     'create_func': self.create_gacig
+                # },
+            }
+            im_path = os.path.join(images_dir, image_id)
+            for mask_category in mask_categories:
+                if not os.path.isdir(os.path.join(im_path, mask_category)):
+                    # set_trace()
+                    print("{} not yet present".format(mask_category))
+                    # mask_categories[mask_category] = True
+                    os.makedirs(os.path.join(im_path, mask_category))
+                # image = self.load_image(image_id)
+                masks = self.load_mask(image_id)[0]
+                for m_id in range(masks.shape[-1]):
+                    m_file = os.path.join(
+                        im_path, mask_category,
+                        mask_category + "_" + str(m_id) + ".png")
+                    if os.path.exists(m_file):
+                        continue
+                    else:
+                        mask = masks[:, :, m_id]
+                        markers = self.base_markers(mask)
+                        modified_mask = mask_categories[mask_category][
+                            'create_func'](mask, markers)
+                        final_mask = self.base_watershed(modified_mask,
+                                                         markers, m_file)
+                        # if mask_category == "gacig_masks": set_trace()
 
     def split_dataset(self, val_size):
         """
@@ -322,7 +457,8 @@ class NucleiDataset(utils.Dataset):
         dataset_train: The train dataset which is a NucleiDataset file
         dataset_val: The val dataset which is a NucleiDataset file
         """
-        train, val = self.split_dataset(0.05)
+        train, val = self.split_dataset(0.2)
+        # set_trace()
         # set_trace()
         # val = [
         #     "4dbbb275960ab9e4ec2c66c8d3000f7c70c8dce5112df591b95db84e25efa6e9",
@@ -360,7 +496,6 @@ class NucleiDataset(utils.Dataset):
         #             datasets[d][1].real_to_id[real_id] = i
         # return datasets
 
-
     def calc_mask_sizes(self):
         """Calculates the sizes of all the masks in the dataset
 
@@ -372,11 +507,11 @@ class NucleiDataset(utils.Dataset):
         for im_id in range(len(self.image_ids)):
             masks, class_ids = self.load_mask(im_id, m_correction=True)
             boxes = utils.extract_bboxes(masks)
-            m_widths = boxes[:,2] - boxes[:,0]
-            m_heights = boxes[:,3] - boxes[:,1]
-            assert (m_widths>0).all(), "You got some negative widths"
-            assert (m_heights>0).all(), "You got some negative heights"
-            m_size = np.stack((m_widths, m_heights),axis=1)
+            m_widths = boxes[:, 2] - boxes[:, 0]
+            m_heights = boxes[:, 3] - boxes[:, 1]
+            assert (m_widths > 0).all(), "You got some negative widths"
+            assert (m_heights > 0).all(), "You got some negative heights"
+            m_size = np.stack((m_widths, m_heights), axis=1)
             m_sizes.append(m_size)
         mask_sizes = np.vstack(m_sizes)
         # Functions to plot the sizes
@@ -384,7 +519,6 @@ class NucleiDataset(utils.Dataset):
         # sns.regplot(x=m_sizes[:,0],y=m_sizes[:,1],fit_reg=False)
         # sns.jointplot(x=m_sizes[:,0], y=m_sizes[:,1], kind="kde")
         return mask_sizes
-
 
     def calc_im_sizes(self):
         """Calculates the sizes of all the masks in the dataset
@@ -404,5 +538,3 @@ class NucleiDataset(utils.Dataset):
         # sns.regplot(x=m_sizes[:,0],y=m_sizes[:,1],fit_reg=False)
         # sns.jointplot(x=m_sizes[:,0], y=m_sizes[:,1], kind="kde")
         return im_sizes
-
-
