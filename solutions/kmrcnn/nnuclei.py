@@ -29,7 +29,7 @@ import pandas as pd
 import glob
 
 from config import Config
-import utils
+import nutils as utils
 import model as modellib
 import skimage
 import copy
@@ -110,6 +110,10 @@ class NucleiConfig(Config):
     # Max number of final detections
     DETECTION_MAX_INSTANCES = 400
 
+    # Bounding box refinement standard deviation for RPN and final detections.
+    RPN_BBOX_STD_DEV = np.array([1.0, 1.0, 1.0, 1.0])
+    BBOX_STD_DEV = np.array([1.0, 1.0, 1.0, 1.0])
+
 
 ############################################################
 #  Dataset
@@ -146,8 +150,8 @@ class NucleiDataset(utils.Dataset):
         bad_masks = open("bad_masks", "r")
         ex_images = open("ex_images", "r")
         b_lines = bad_masks.readlines()
-        ex_lines = ex_images.readlines()
-        for ex_im in ex_lines:
+        self.ex_lines = ex_images.readlines()
+        for ex_im in self.ex_lines:
             if ex_im[:-1] in image_ids:
                 image_ids.remove(ex_im[:-1])
         # set_trace()
@@ -198,7 +202,7 @@ class NucleiDataset(utils.Dataset):
                 mask = skimage.io.imread(
                     os.path.join(mask_path + '_1', mask_file))
             else:
-                print("Using Lopuhin's corrections for {}".format(mask_file))
+                # print("Using Lopuhin's corrections for {}".format(mask_file))
                 mask_id = mask_file.split(".")[0]
                 new_mask_ids = glob.glob(
                     os.path.join(new_masks_path, mask_id + "*"))
@@ -399,6 +403,8 @@ class NucleiDataset(utils.Dataset):
         image_ids = next(os.walk(images_dir))[1]
         # Loop over all of the images
         for image_id in image_ids:
+            if image_id + "\n" in self.ex_lines:
+                continue
             mask_categories = {
                 'watershed_masks': {
                     'present': False,

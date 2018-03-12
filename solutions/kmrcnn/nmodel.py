@@ -1676,10 +1676,19 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
             np.log(gt_w / a_w),
         ]
         # Normalize
+        # Attempt to implement better normalization here
         rpn_bbox[ix] /= config.RPN_BBOX_STD_DEV
         ix += 1
-
-    return rpn_match, rpn_bbox
+    # set_trace()
+    # Normalization
+    bbox_counts = len(ids)
+    pos_rpn_bbox = rpn_bbox[:bbox_counts,:]
+    # sum_bbox = pos_rpn_bbox.sum(axis=0)
+    # squared_sum_bbox = (pos_rpn_bbox**2).sum(axis=0)
+    # means = sum_bbox / bbox_counts
+    # stds = np.sqrt(squared_sum_bbox / bbox_counts - means**2)
+    # set_trace()
+    return rpn_match, rpn_bbox, pos_rpn_bbox
 
 
 def generate_random_rois(image_shape, count, gt_class_ids, gt_boxes):
@@ -1837,7 +1846,7 @@ def data_generator(dataset,
                 continue
 
             # RPN Targets
-            rpn_match, rpn_bbox = build_rpn_targets(
+            rpn_match, rpn_bbox, rpn_bbox_std = build_rpn_targets(
                 image.shape, anchors, gt_class_ids, gt_boxes, config)
 
             # Mask R-CNN Targets
@@ -1944,7 +1953,7 @@ def data_generator(dataset,
                             batch_mrcnn_mask
                         ])
 
-                yield inputs, outputs
+                yield inputs, outputs, rpn_bbox_std
 
                 # start a new batch
                 b = 0
