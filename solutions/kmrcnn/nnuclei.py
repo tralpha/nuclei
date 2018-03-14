@@ -111,7 +111,7 @@ class NucleiConfig(Config):
     DETECTION_MAX_INSTANCES = 400
 
     # Bounding box refinement standard deviation for RPN and final detections.
-    RPN_BBOX_STD_DEV = np.array([1.0, 1.0, 1.0, 1.0])
+    RPN_BBOX_STD_DEV = np.array([0.15194419, 0.15036527, 0.28001702, 0.28143383])
     BBOX_STD_DEV = np.array([1.0, 1.0, 1.0, 1.0])
 
 

@@ -22,6 +22,8 @@ import shutil
 from skimage.morphology import label
 from skimage.transform import resize
 from IPython.core.debugger import set_trace
+import matplotlib.pyplot as plt
+import cv2
 
 # URL from which to download the latest COCO trained weights
 COCO_MODEL_URL = "https://github.com/matterport/Mask_RCNN/releases/download/v2.0/mask_rcnn_coco.h5"
@@ -859,9 +861,115 @@ def resh_to_orig(final_masks, image_meta, dataset=None):
         w_masks, (im_shape[0], im_shape[1]),
         mode='constant',
         preserve_range=True)
-    # ron_masks means resized one masks
+    #ron_masks means resized one masks
     ron_masks = np.where(resized_masks > 0.5, 1, 0).astype('uint8')
     # Load the original image masks, and then put it in range 0 - 1
     o_masks = dataset.load_mask(image_meta[0])[0]
     o1_masks = np.where(o_masks == 255.0, 1, 0)
-    return ron_masks, o1_masks
+    # set_trace()
+    return w_masks, o1_masks
+
+
+def flatten_mask(mask):
+    n_gt_masks = mask.shape[-1]
+    height, width = mask.shape[:2]
+    labels = np.zeros((height, width), np.uint16)
+    for index in range(0, n_gt_masks):
+        labels[mask[:, :, index] > 0] = index + 1
+    return labels
+
+
+################################################
+# Methods from HCK
+################################################
+
+
+def run_length_encode(x):
+    bs = np.where(x.T.flatten())[0]
+
+    rle = []
+    prev = -2
+    for b in bs:
+        if (b>prev+1): rle.extend((b + 1, 0))
+        rle[-1] += 1
+        prev = b
+
+    #https://www.kaggle.com/c/data-science-bowl-2018/discussion/48561#
+    if len(rle)!=0 and rle[-1]+rle[-2] == x.size:
+        rle[-2] = rle[-2] -1  #print('xxx')
+
+    rle = ' '.join([str(r) for r in rle])
+    return rle
+
+
+def run_length_decode(rle, H, W, fill_value=255):
+
+    mask = np.zeros((H * W), np.uint8)
+    rle = np.array([int(s) for s in rle.split(' ')]).reshape(-1, 2)
+    for r in rle:
+        start = r[0]-1
+        end = start + r[1]
+        mask[start : end] = fill_value
+    mask = mask.reshape(W, H).T # H, W need to swap as transposing.
+    return mask
+
+
+def multi_mask_to_color_overlay(multi_mask, image=None, color=None):
+
+    height,width = multi_mask.shape[:2]
+    overlay = np.zeros((height,width,3),np.uint8) if image is None else image.copy()
+    num_masks = int(multi_mask.max())
+    if num_masks==0: return overlay
+
+    if type(color) in [str] or color is None:
+        #https://matplotlib.org/xkcd/examples/color/colormaps_reference.html
+
+        if color is None: color='summer'  #'cool' #'brg'
+        color = plt.get_cmap(color)(np.arange(0,1,1/num_masks))
+        color = np.array(color[:,:3])*255
+        color = np.fliplr(color)
+        #np.random.shuffle(color)
+
+    elif type(color) in [list,tuple]:
+        color = [ color for i in range(num_masks) ]
+
+    for i in range(num_masks):
+        mask = multi_mask==i+1
+        overlay[mask]=color[i]
+        #overlay = instance[:,:,np.newaxis]*np.array( color[i] ) +  (1-instance[:,:,np.newaxis])*overlay
+
+    return overlay
+
+
+def multi_mask_to_contour_overlay(multi_mask, image=None, color=[255,255,255]):
+
+    height,width = multi_mask.shape[:2]
+    overlay = np.zeros((height,width,3),np.uint8) if image is None else image.copy()
+    num_masks = int(multi_mask.max())
+    if num_masks==0: return overlay
+
+    for i in range(num_masks):
+        mask = multi_mask==i+1
+        contour = mask_to_inner_contour(mask)
+        overlay[contour]=color
+
+    return overlay
+
+
+def mask_to_inner_contour(mask):
+    pad = np.lib.pad(mask, ((1, 1), (1, 1)), 'reflect')
+    contour = mask & (
+            (pad[1:-1,1:-1] != pad[:-2,1:-1]) \
+          | (pad[1:-1,1:-1] != pad[2:,1:-1])  \
+          | (pad[1:-1,1:-1] != pad[1:-1,:-2]) \
+          | (pad[1:-1,1:-1] != pad[1:-1,2:])
+    )
+    return contour
+
+
+def image_show(name, image, resize=1):
+    H,W = image.shape[0:2]
+    cv2.namedWindow(name, cv2.WINDOW_NORMAL)
+    cv2.imshow(name, image.astype(np.uint8))
+    cv2.resizeWindow(name, round(resize*W), round(resize*H))
+

@@ -254,7 +254,7 @@ def conv_block(input_tensor,
     return x
 
 
-def resnet_graph(input_image, architecture, stage5=False, use_resnext=False):
+def resnet_graph(input_image, architecture, stage5=False, use_resnext=True):
     assert architecture in ["resnet50", "resnet101"]
     cardinality = 32 if use_resnext else 1
     # Stage 1
@@ -530,8 +530,8 @@ class PyramidROIAlign(KE.Layer):
         # the fact that our coordinates are normalized here.
         # e.g. a 224x224 ROI (in pixels) maps to P4
         image_area = tf.cast(im_shape[1] * im_shape[2], tf.float32)
-        roi_level = log2_graph(tf.sqrt(h * w) / (32.0 / tf.sqrt(image_area)))
-        set_trace()
+        roi_level = log2_graph(tf.sqrt(h * w) / (224.0 / tf.sqrt(image_area)))
+        # set_trace()
         roi_level = tf.minimum(
             5, tf.maximum(2, 4 + tf.cast(tf.round(roi_level), tf.int32)))
         roi_level = tf.squeeze(roi_level, 2)
@@ -574,7 +574,7 @@ class PyramidROIAlign(KE.Layer):
 
         # Pack pooled features into one tensor
         pooled = tf.concat(pooled, axis=0)
-        set_trace()
+        # set_trace()
 
 
         # Pack box_to_level mapping into one array and add another
