@@ -289,14 +289,14 @@ class Dataset(object):
         self.class_names = [clean_name(c["name"]) for c in self.class_info]
         self.num_images = len(self.image_info)
         self._image_ids = np.arange(self.num_images)
-
+        # set_trace()
         cl_df = pd.read_csv('classes.csv')
         cl_df['im_type'] = cl_df.foreground.str.cat(cl_df.background)
         cl_df['filename'] = cl_df['filename'].apply(lambda x: x[:-4])
 
-        current_cl_df = cl_df[np.in1d(cl_df['filename'],
+        self.current_cl_df = cl_df[np.in1d(cl_df['filename'],
                                       list(self.real_to_id.keys()))]
-        self.type_analysis = current_cl_df.groupby(['im_type']).count()
+        self.type_analysis = self.current_cl_df.groupby(['im_type']).count()
         self.type_analysis["percentage"] = self.type_analysis[
             'filename'] / self.num_images
         self.type_analysis.drop(columns=['foreground','background'])

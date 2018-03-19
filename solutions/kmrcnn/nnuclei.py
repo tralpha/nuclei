@@ -111,7 +111,8 @@ class NucleiConfig(Config):
     DETECTION_MAX_INSTANCES = 400
 
     # Bounding box refinement standard deviation for RPN and final detections.
-    RPN_BBOX_STD_DEV = np.array([0.15194419, 0.15036527, 0.28001702, 0.28143383])
+    RPN_BBOX_STD_DEV = np.array(
+        [0.15194419, 0.15036527, 0.28001702, 0.28143383])
     BBOX_STD_DEV = np.array([1.0, 1.0, 1.0, 1.0])
 
 
@@ -124,7 +125,9 @@ class NucleiDataset(utils.Dataset):
     def load_nuclei(self,
                     dataset_dir="../../input",
                     subset="train",
-                    image_ids=None):
+                    stage="stage1",
+                    image_ids=None,
+                    algo_mode=None):
         """Load a subset of the nuclei dataset.
         dataset_dir: The root directory of the nuclei dataset.
         subset: What to load (train, test)
@@ -134,10 +137,19 @@ class NucleiDataset(utils.Dataset):
         # assert image_ids and subset == "train"
         self.add_class("nuclei", 1, "nu")
 
+        # Create mode of the dataset
+        self.mode = subset
+
+        # Stage of the dataset
+        self.stage = stage
+
+        # Mode of algorithm to train images
+        self.algo_mode = algo_mode
+
         image_dir = "{}/stage1_{}".format(dataset_dir, subset)
 
         if image_ids is not None:
-            assert subset == "train", "Build train & val from train set"
+            # assert subset == "train", "Build train & val from train set"
             image_ids = image_ids
             image_ids = [iid for iid in image_ids]
         else:
@@ -215,7 +227,7 @@ class NucleiDataset(utils.Dataset):
         if mask.ndim == 3:
             print("Very weird, found a 3D Mask for {}. We'll reshape it".
                   format(mask_file))
-            mask = mask[:,:,0]
+            mask = mask[:, :, 0]
         labels, nlabels = ndimage.label(mask)
         masks = []
         class_ids = []
@@ -479,6 +491,39 @@ class NucleiDataset(utils.Dataset):
         # train_classes = cl_df.loc[np.where(cl_df == train_ids)]
         return X_train, X_val
 
+    def create_splits(self):
+        """
+        Function to create split files
+        """
+        grouped_classes = self.current_cl_df.groupby("im_type")
+        groups = grouped_classes.groups.keys()
+        if self.algo_mode is not None:
+            mode = self.algo_mode
+        else:
+            mode = self.mode
+        for group in groups:
+            group_ids = grouped_classes.get_group(group)
+            # Save the group ids
+            hck_dir = "../../20180306/data/split/"
+            f_name = mode + "1" + "_ids_" + group + "_" + str(
+                len(group_ids))
+            save_file = os.path.join(hck_dir, f_name)
+            save_file = open(save_file, 'w')
+            for g_file in group_ids['filename']:
+                im_id = "{}_{}/{}\n".format(self.stage, self.mode, g_file)
+                # set_trace()
+                save_file.write(im_id)
+            # set_trace()
+        # Create split for all
+        # set_trace()
+        f_name = mode + "1" + "_ids_all_" + str(len(self.current_cl_df))
+        save_file = os.path.join(hck_dir, f_name)
+        save_file = open(save_file, 'w')
+        for g_file in self.current_cl_df['filename']:
+            im_id = "{}_{}/{}\n".format(self.stage, self.mode, g_file)
+            save_file.write(im_id)
+
+
     def extract_train_val(self):
         """Extracts the train and validation set images from the dataset
 
@@ -497,33 +542,11 @@ class NucleiDataset(utils.Dataset):
         # ]
         dataset_train = NucleiDataset()
         dataset_val = NucleiDataset()
-        dataset_train.load_nuclei(image_ids=train)
-        dataset_val.load_nuclei(image_ids=val)
+        dataset_train.load_nuclei(image_ids=train, algo_mode="algo_train")
+        dataset_val.load_nuclei(image_ids=val, algo_mode="algo_valid")#, subset="algo_val")
         # dataset_val = NucleiDataset().load_nuclei(image_ids=val)
         # set_trace()
         return dataset_train, dataset_val
-        # dataset_train = copy.deepcopy(self)
-        # dataset_val = copy.deepcopy(self)
-        # datasets = {"train": [train, dataset_train], "val": [val, dataset_val]}
-        # real_ids = list(self.real_to_id.keys())
-        # for d in datasets:
-        #     d_bool = np.in1d([im + '.png' for im in real_ids], datasets[d][0])
-        #     datasets[d][1].image_info = []
-        #     datasets[d][1]._image_ids = []
-        #     datasets[d][1].real_to_id = {}
-        #     for idx, i in enumerate(d_bool):
-        #         if i:
-        #             real_id = real_ids[idx]
-        #             datasets[d][1].image_ids.append(idx)
-        #             img_info = {
-        #                 "source": "nuclei_" + d,
-        #                 "id": real_id,
-        #                 "path": self.image_info[idx]['path'],
-        #                 "m_path": self.image_info[idx]['m_path']
-        #             }
-        #             datasets[d][1].image_info.append(img_info)
-        #             datasets[d][1].real_to_id[real_id] = i
-        # return datasets
 
     def calc_mask_sizes(self):
         """Calculates the sizes of all the masks in the dataset
@@ -543,10 +566,6 @@ class NucleiDataset(utils.Dataset):
             m_size = np.stack((m_widths, m_heights), axis=1)
             m_sizes.append(m_size)
         mask_sizes = np.vstack(m_sizes)
-        # Functions to plot the sizes
-        # import seaborn as sns
-        # sns.regplot(x=m_sizes[:,0],y=m_sizes[:,1],fit_reg=False)
-        # sns.jointplot(x=m_sizes[:,0], y=m_sizes[:,1], kind="kde")
         return mask_sizes
 
     def calc_im_sizes(self):
@@ -562,8 +581,4 @@ class NucleiDataset(utils.Dataset):
             image = self.load_image(im_id)
             im_sizes.append(image.shape[:-1])
         im_sizes = np.vstack(im_sizes)
-        # Functions to plot the sizes
-        # import seaborn as sns
-        # sns.regplot(x=m_sizes[:,0],y=m_sizes[:,1],fit_reg=False)
-        # sns.jointplot(x=m_sizes[:,0], y=m_sizes[:,1], kind="kde")
         return im_sizes
