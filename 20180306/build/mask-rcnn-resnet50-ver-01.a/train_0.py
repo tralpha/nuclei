@@ -46,7 +46,7 @@ def train_augment(image, multi_mask, meta, index):
     #---------------------------------------
     input = torch.from_numpy(image.transpose((2, 0, 1))).float().div(255)
     box, label, instance = multi_mask_to_annotation(multi_mask)
-
+    # print("testing")
     return input, box, label, instance, meta, index
 
 
@@ -76,24 +76,68 @@ def train_collate(batch):
     return [inputs, boxes, labels, instances, metas, indices]
 
 
+def train_ap(net, truth_boxes, truth_labels, truth_instances, metas,
+             map_detail):
+    batch_size = len(truth_instances)
+    masks = net.masks
+    detections = net.detections.cpu().numpy()
+    mask_precisions = []
+    box_precisions = []
+    for b in range(batch_size):
+        truth_box = truth_boxes[b]
+        if len(truth_box) == 0: continue
+        # from IPython.core.debugger import set_trace; set_trace()
+        truth_mask = instance_to_multi_mask(truth_instances[b])
+        truth_label = truth_labels[b]
+        truth_instance = truth_instances[b]
+        meta = metas[b]
+
+        index = np.where(detections[:, 0] == b)[0]
+        detection = detections[index]
+        box = detection[:, 1:5]
+        mask = masks[b]
+
+        mask_average_prec, mask_precision = compute_average_precision_for_mask(
+            mask, truth_mask, t_range=np.arange(0.5, 1.0, 0.05))
+        box_precision = compute_precision_for_box(
+            box, truth_box, truth_label, threshold=[0.5])[0]
+
+        mask_precisions.append(mask_average_prec)
+        map_detail[meta][0] += mask_average_prec
+        map_detail[meta][1] += 1
+        box_precisions.append(box_precision)
+    return np.array(mask_precisions).mean(), map_detail
+
+
 ### training ##############################################################
 def evaluate(net, test_loader):
 
     test_num = 0
     test_loss = np.zeros(6, np.float32)
     test_acc = 0
+    map_detail = {
+        'whiteblack': (0.0, 0),
+        'purplepurple': (0.0, 0),
+        'purplewhite': (0.0, 0),
+        'blackwhite': (0.0, 0)
+    }
     for i, (inputs, truth_boxes, truth_labels, truth_instances, metas,
             indices) in enumerate(test_loader, 0):
 
         with torch.no_grad():
-            inputs = Variable(inputs)#.cuda()
+            inputs = Variable(inputs)  #.cuda()
             net(inputs, truth_boxes, truth_labels, truth_instances)
             loss = net.loss(inputs, truth_boxes, truth_labels, truth_instances)
 
         # acc    = dice_loss(masks, labels) #todo
 
         batch_size = len(indices)
-        test_acc += 0  #batch_size*acc[0][0]
+        mask_ap, map_detail = train_ap(net, truth_boxes, truth_labels,
+                                       truth_instances, metas, map_detail)
+        # mask_ap = 0
+        test_acc += mask_ap
+        #batch_size*acc[0][0]
+        # from IPython.core.debugger import set_trace; set_trace()
         test_loss += batch_size * np.array((
             loss.cpu().data.numpy(),
             net.rpn_cls_loss.cpu().data.numpy(),
@@ -102,10 +146,12 @@ def evaluate(net, test_loader):
             net.rcnn_reg_loss.cpu().data.numpy(),
             net.mask_cls_loss.cpu().data.numpy(), ))
         test_num += batch_size
-
     assert (test_num == len(test_loader.sampler))
     test_acc = test_acc / test_num
     test_loss = test_loss / test_num
+    for im_type in map_detail:
+        map_detail[im_type] = map_detail[im_type][0]/map_detail[im_type][1]
+    print(map_detail)
     return test_loss, test_acc
 
 
@@ -199,14 +245,14 @@ def run_train():
         #'disk0_ids_dummy_9', mode='train', #12
         #'train1_ids_purple_only1_101', mode='train', #12
         #'merge1_1', mode='train',
-        transform=valid_augment)
+        transform=train_augment)
 
     train_loader = DataLoader(
         train_dataset,
         sampler=RandomSampler(train_dataset),
         batch_size=batch_size,
         drop_last=True,
-        num_workers=4,
+        num_workers=0,
         pin_memory=True,
         collate_fn=train_collate)
 
@@ -243,7 +289,7 @@ def run_train():
     #<debug>========================================================================================
     if 0:
         for inputs, truth_boxes, truth_labels, truth_instances, metas, indices in valid_loader:
-        # for ins in train_loader: print(ins)
+            # for ins in train_loader: print(ins)
 
             batch_size, C, H, W = inputs.size()
             print('batch_size=%d' % batch_size)
@@ -264,8 +310,8 @@ def run_train():
                     print('label=%d' % label)
 
                     x0, y0, x1, y1 = box.astype(np.int32)
-                    cv2.rectangle(box_overlay, (x0, y0), (x1, y1),
-                                  (0, 0, 255), 1)
+                    cv2.rectangle(box_overlay, (x0, y0), (x1, y1), (0, 0, 255),
+                                  1)
 
                     mask = instance > 0.5
                     contour = mask_to_inner_contour(mask)
@@ -326,11 +372,11 @@ def run_train():
                 net.set_mode('train')
 
                 print('\r', end='', flush=True)
-                log.write('%0.4f %5.1f k %6.1f %4.1f m | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f | %s\n' % (\
+                log.write('%0.4f %5.1f k %6.1f %4.1f m | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  %0.3f | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  %0.3f | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  %0.3f | %s\n' % (\
                          rate, i/1000, epoch, num_products/1000000,
-                         valid_loss[0], valid_loss[1], valid_loss[2], valid_loss[3], valid_loss[4], valid_loss[5],#valid_acc,
-                         train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_loss[4], train_loss[5],#train_acc,
-                         batch_loss[0], batch_loss[1], batch_loss[2], batch_loss[3], batch_loss[4], batch_loss[5],#batch_acc,
+                         valid_loss[0], valid_loss[1], valid_loss[2], valid_loss[3], valid_loss[4], valid_loss[5],valid_acc,
+                         train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_loss[4], train_loss[5],train_acc,
+                         batch_loss[0], batch_loss[1], batch_loss[2], batch_loss[3], batch_loss[4], batch_loss[5],batch_acc,
                          time_to_str((timer() - start)/60)))
                 time.sleep(0.01)
 
@@ -367,7 +413,9 @@ def run_train():
                 optimizer.zero_grad()
 
             # print statistics  ------------
-            batch_acc = 0  #acc[0][0]
+            # batch_acc = 0  #acc[0][0]
+            batch_acc = train_ap(net, truth_boxes, truth_labels,
+                                 truth_instances)
             batch_loss = np.array((
                 loss.cpu().data.numpy(),
                 net.rpn_cls_loss.cpu().data.numpy(),
@@ -386,16 +434,16 @@ def run_train():
                 sum = 0
 
 
-            print('\r%0.4f %5.1f k %6.1f %4.1f m | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f | %s  %d,%d,%s' % (\
+            print('\r%0.4f %5.1f k %6.1f %4.1f m | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  %0.3f | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  %0.3f | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  %0.3f | %s  %d,%d,%s' % (\
                          rate, i/1000, epoch, num_products/1000000,
-                         valid_loss[0], valid_loss[1], valid_loss[2], valid_loss[3], valid_loss[4], valid_loss[5],#valid_acc,
-                         train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_loss[4], train_loss[5],#train_acc,
-                         batch_loss[0], batch_loss[1], batch_loss[2], batch_loss[3], batch_loss[4], batch_loss[5],#batch_acc,
+                         valid_loss[0], valid_loss[1], valid_loss[2], valid_loss[3], valid_loss[4], valid_loss[5],valid_acc,
+                         train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_loss[4], train_loss[5],train_acc,
+                         batch_loss[0], batch_loss[1], batch_loss[2], batch_loss[3], batch_loss[4], batch_loss[5],batch_acc,
                          time_to_str((timer() - start)/60) ,i,j, ''), end='',flush=True)#str(inputs.size()))
             j = j + 1
 
             #<debug> ===================================================================
-            if 1:
+            if 0:
                 #if i%10==0:
 
                 net.set_mode('test')
@@ -507,8 +555,8 @@ def run_train():
     pass  #-- end of all iterations --
 
     if 1:  #save last
-        torch.save(net.state_dict(), out_dir + '/checkpoint/%d_model.pth' %
-                   (i))
+        torch.save(net.state_dict(),
+                   out_dir + '/checkpoint/%d_model.pth' % (i))
         torch.save({
             'optimizer': optimizer.state_dict(),
             'iter': i,

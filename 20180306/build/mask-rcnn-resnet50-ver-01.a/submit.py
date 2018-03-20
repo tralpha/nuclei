@@ -134,7 +134,7 @@ def submit_collate(batch):
 
 #--------------------------------------------------------------
 def run_submit():
-    # from IPython.core.debugger import set_trace; set_trace()
+    from IPython.core.debugger import set_trace; set_trace()
     out_dir = RESULTS_DIR + '/mask-rcnn-50-gray500-02'
     initial_checkpoint = \
         RESULTS_DIR + '/mask-rcnn-50-gray500-02/checkpoint/00016500_model.pth'
@@ -314,7 +314,7 @@ def run_npy_to_sumbit_csv():
 
     submit_dir  = \
         ('/Users/ralphtigoumo/Documents/kaggle/nuclei/20180306/'
-            'results/mask-rcnn-50-gray500-02/submit')
+            'results/mask-rcnn-50-gray500-03/submit')
 
     npy_dir = submit_dir + '/npys'
     csv_file = submit_dir + '/submission-gray53-only.csv'
@@ -325,7 +325,7 @@ def run_npy_to_sumbit_csv():
     cvs_EncodedPixels = []
 
     npy_files = glob.glob(npy_dir + '/*.npy')
-    # set_trace()
+    set_trace()
     for npy_file in npy_files:
         name = npy_file.split('/')[-1].replace('.npy', '')
 

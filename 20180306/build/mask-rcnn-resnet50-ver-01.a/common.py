@@ -54,6 +54,7 @@ import matplotlib.pyplot as plt
 
 import skimage
 import skimage.color
+import skimage.io
 import skimage.morphology
 from scipy import ndimage
 

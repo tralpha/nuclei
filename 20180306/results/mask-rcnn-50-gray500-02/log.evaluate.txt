@@ -1,0 +1,84 @@
+
+--- [START 2018-03-15_22-52-07] ----------------------------------------------------------------
+
+** some experiment setting **
+	SEED         = 35202
+	PROJECT_PATH = /Users/ralphtigoumo/Documents/kaggle/nuclei/20180306/build/mask-rcnn-resnet50-ver-01.a
+	out_dir      = /Users/ralphtigoumo/documents/kaggle/nuclei/20180306/results/mask-rcnn-50-gray500-02
+
+	initial_checkpoint = /Users/ralphtigoumo/documents/kaggle/nuclei/20180306/results/mask-rcnn-50-gray500-02/checkpoint/00016500_model.pth
+<class 'net.resnet50_mask_rcnn.model.MaskRcnnNet'>
+
+
+** dataset setting **
+
+--- [START 2018-03-15_22-52-07] ----------------------------------------------------------------
+
+** some experiment setting **
+	SEED         = 35202
+	PROJECT_PATH = /Users/ralphtigoumo/Documents/kaggle/nuclei/20180306/build/mask-rcnn-resnet50-ver-01.a
+	out_dir      = /Users/ralphtigoumo/documents/kaggle/nuclei/20180306/results/mask-rcnn-50-gray500-02
+
+	initial_checkpoint = /Users/ralphtigoumo/documents/kaggle/nuclei/20180306/results/mask-rcnn-50-gray500-02/checkpoint/00016500_model.pth
+<class 'net.resnet50_mask_rcnn.model.MaskRcnnNet'>
+
+
+** dataset setting **
+	test_dataset.split = test1_ids_gray2_53
+	len(test_dataset)  = 53
+
+** start evaluation here! **
+
+--- [START 2018-03-15_22-52-07] ----------------------------------------------------------------
+
+** some experiment setting **
+	SEED         = 35202
+	PROJECT_PATH = /Users/ralphtigoumo/Documents/kaggle/nuclei/20180306/build/mask-rcnn-resnet50-ver-01.a
+	out_dir      = /Users/ralphtigoumo/documents/kaggle/nuclei/20180306/results/mask-rcnn-50-gray500-02
+
+	initial_checkpoint = /Users/ralphtigoumo/documents/kaggle/nuclei/20180306/results/mask-rcnn-50-gray500-02/checkpoint/00016500_model.pth
+<class 'net.resnet50_mask_rcnn.model.MaskRcnnNet'>
+
+
+** dataset setting **
+	test_dataset.split = test1_ids_gray2_53
+	len(test_dataset)  = 53
+
+** start evaluation here! **
+
+--- [START 2018-03-15_22-52-07] ----------------------------------------------------------------
+
+** some experiment setting **
+	SEED         = 35202
+	PROJECT_PATH = /Users/ralphtigoumo/Documents/kaggle/nuclei/20180306/build/mask-rcnn-resnet50-ver-01.a
+	out_dir      = /Users/ralphtigoumo/documents/kaggle/nuclei/20180306/results/mask-rcnn-50-gray500-02
+
+	initial_checkpoint = /Users/ralphtigoumo/documents/kaggle/nuclei/20180306/results/mask-rcnn-50-gray500-02/checkpoint/00016500_model.pth
+<class 'net.resnet50_mask_rcnn.model.MaskRcnnNet'>
+
+
+** dataset setting **
+	test_dataset.split = test1_ids_gray2_53
+	len(test_dataset)  = 53
+
+** start evaluation here! **
+
+--- [START 2018-03-15_22-52-07] ----------------------------------------------------------------
+
+** some experiment setting **
+	SEED         = 35202
+	PROJECT_PATH = /Users/ralphtigoumo/Documents/kaggle/nuclei/20180306/build/mask-rcnn-resnet50-ver-01.a
+	out_dir      = /Users/ralphtigoumo/documents/kaggle/nuclei/20180306/results/mask-rcnn-50-gray500-02
+
+	initial_checkpoint = /Users/ralphtigoumo/documents/kaggle/nuclei/20180306/results/mask-rcnn-50-gray500-02/checkpoint/00016500_model.pth
+<class 'net.resnet50_mask_rcnn.model.MaskRcnnNet'>
+
+
+** dataset setting **
+	test_dataset.split = test1_ids_gray2_53
+	len(test_dataset)  = 53
+
+** start evaluation here! **
+initial_checkpoint  = /Users/ralphtigoumo/documents/kaggle/nuclei/20180306/results/mask-rcnn-50-gray500-02/checkpoint/00016500_model.pth
+test_num  = 53
+
