@@ -44,9 +44,10 @@ def train_augment(image, multi_mask, meta, index):
     ##image,  multi_mask = fix_crop_transform2(image, multi_mask, -1,-1,WIDTH, HEIGHT)
 
     #---------------------------------------
+    # image = skimage.exposure.rescale_intensity(
+    #     image * 1.0, out_range=(0.0, 1.0))
     input = torch.from_numpy(image.transpose((2, 0, 1))).float().div(255)
     box, label, instance = multi_mask_to_annotation(multi_mask)
-    # print("testing")
     return input, box, label, instance, meta, index
 
 
@@ -56,6 +57,8 @@ def valid_augment(image, multi_mask, meta, index):
                                             HEIGHT)
 
     #---------------------------------------
+    # image = skimage.exposure.rescale_intensity(
+    #     image * 1.0, out_range=(0.0, 1.0))
     input = torch.from_numpy(image.transpose((2, 0, 1))).float().div(255)
     box, label, instance = multi_mask_to_annotation(multi_mask)
 
@@ -76,8 +79,19 @@ def train_collate(batch):
     return [inputs, boxes, labels, instances, metas, indices]
 
 
-def train_ap(net, truth_boxes, truth_labels, truth_instances, metas,
-             map_detail):
+def train_ap(net,
+             truth_boxes,
+             truth_labels,
+             truth_instances,
+             metas,
+             map_detail=None):
+    if map_detail is None:
+        map_detail = {
+            'whiteblack': [],
+            'purplepurple': [],
+            'purplewhite': [],
+            'blackwhite': []
+        }
     batch_size = len(truth_instances)
     masks = net.masks
     detections = net.detections.cpu().numpy()
@@ -91,6 +105,8 @@ def train_ap(net, truth_boxes, truth_labels, truth_instances, metas,
         truth_label = truth_labels[b]
         truth_instance = truth_instances[b]
         meta = metas[b]
+        # if meta != 'whiteblack': 
+        #     from IPython.core.debugger import set_trace; set_trace()
 
         index = np.where(detections[:, 0] == b)[0]
         detection = detections[index]
@@ -103,8 +119,8 @@ def train_ap(net, truth_boxes, truth_labels, truth_instances, metas,
             box, truth_box, truth_label, threshold=[0.5])[0]
 
         mask_precisions.append(mask_average_prec)
-        map_detail[meta][0] += mask_average_prec
-        map_detail[meta][1] += 1
+        map_detail[meta].append(mask_average_prec)
+        # map_detail[meta][1] += 1
         box_precisions.append(box_precision)
     return np.array(mask_precisions).mean(), map_detail
 
@@ -116,10 +132,10 @@ def evaluate(net, test_loader):
     test_loss = np.zeros(6, np.float32)
     test_acc = 0
     map_detail = {
-        'whiteblack': (0.0, 0),
-        'purplepurple': (0.0, 0),
-        'purplewhite': (0.0, 0),
-        'blackwhite': (0.0, 0)
+        'whiteblack': [],
+        'purplepurple': [],
+        'purplewhite': [],
+        'blackwhite': []
     }
     for i, (inputs, truth_boxes, truth_labels, truth_instances, metas,
             indices) in enumerate(test_loader, 0):
@@ -133,9 +149,9 @@ def evaluate(net, test_loader):
 
         batch_size = len(indices)
         mask_ap, map_detail = train_ap(net, truth_boxes, truth_labels,
-                                       truth_instances, metas, map_detail)
+                                       truth_instances, metas, map_detail=map_detail)
         # mask_ap = 0
-        test_acc += mask_ap
+        test_acc += batch_size*mask_ap
         #batch_size*acc[0][0]
         # from IPython.core.debugger import set_trace; set_trace()
         test_loss += batch_size * np.array((
@@ -150,9 +166,11 @@ def evaluate(net, test_loader):
     test_acc = test_acc / test_num
     test_loss = test_loss / test_num
     for im_type in map_detail:
-        map_detail[im_type] = map_detail[im_type][0]/map_detail[im_type][1]
-    print(map_detail)
-    return test_loss, test_acc
+        if map_detail[im_type]:
+            map_detail[im_type] = np.array(map_detail[im_type]).mean()
+        else:
+            map_detail[im_type] = 0.0
+    return test_loss, test_acc, map_detail
 
 
 #--------------------------------------------------------------
@@ -330,7 +348,7 @@ def run_train():
 
     log.write(' images_per_epoch = %d\n\n' % len(train_dataset))
     log.write(
-        ' rate    iter   epoch  num   | valid_loss               | train_loss               | batch_loss               |  time          \n'
+        ' rate    iter   epoch  num   | valid_loss               | valid_acc               | train_loss               | train_acc               | batch_loss               | batch_acc               |  time          \n'
     )
     log.write(
         '-------------------------------------------------------------------------------------------------------------------------------\n'
@@ -338,10 +356,23 @@ def run_train():
 
     train_loss = np.zeros(6, np.float32)
     train_acc = 0.0
+    t_map = {
+        'whiteblack': 0.0,
+        'purplepurple': 0.0,
+        'purplewhite': 0.0,
+        'blackwhite': 0.0
+    }
     valid_loss = np.zeros(6, np.float32)
     valid_acc = 0.0
     batch_loss = np.zeros(6, np.float32)
     batch_acc = 0.0
+    b_map = {
+        'whiteblack': 0.0,
+        'purplepurple': 0.0,
+        'purplewhite': 0.0,
+        'blackwhite': 0.0
+    }
+
     rate = 0
 
     start = timer()
@@ -351,6 +382,12 @@ def run_train():
     while i < num_iters:  # loop over the dataset multiple times
         sum_train_loss = np.zeros(6, np.float32)
         sum_train_acc = 0.0
+        sum_map_detail = {
+            'whiteblack': [],
+            'purplepurple': [],
+            'purplewhite': [],
+            'blackwhite': []
+        }
         sum = 0
 
         net.set_mode('train')
@@ -368,15 +405,18 @@ def run_train():
 
             if i % iter_valid == 0:
                 net.set_mode('valid')
-                valid_loss, valid_acc = evaluate(net, valid_loader)
+                valid_loss, valid_acc, v_map = evaluate(net, valid_loader)
                 net.set_mode('train')
 
                 print('\r', end='', flush=True)
-                log.write('%0.4f %5.1f k %6.1f %4.1f m | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  %0.3f | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  %0.3f | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  %0.3f | %s\n' % (\
+                log.write('%0.4f %5.1f k %6.1f %4.1f m | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  | %0.4f   %0.4f %0.4f   %0.4f %0.4f  | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  | %0.4f   %0.4f %0.4f   %0.4f %0.4f  | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  | %0.4f   %0.4f %0.4f   %0.4f %0.4f  | %s\n' % (\
                          rate, i/1000, epoch, num_products/1000000,
-                         valid_loss[0], valid_loss[1], valid_loss[2], valid_loss[3], valid_loss[4], valid_loss[5],valid_acc,
-                         train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_loss[4], train_loss[5],train_acc,
-                         batch_loss[0], batch_loss[1], batch_loss[2], batch_loss[3], batch_loss[4], batch_loss[5],batch_acc,
+                         valid_loss[0], valid_loss[1], valid_loss[2], valid_loss[3], valid_loss[4], valid_loss[5],#valid_acc,
+                         valid_acc, v_map['whiteblack'], v_map['purplepurple'], v_map['blackwhite'], v_map['purplewhite'],
+                         train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_loss[4], train_loss[5],#train_acc,
+                         train_acc, t_map['whiteblack'], t_map['purplepurple'], t_map['blackwhite'], t_map['purplewhite'],
+                         batch_loss[0], batch_loss[1], batch_loss[2], batch_loss[3], batch_loss[4], batch_loss[5],#batch_acc,
+                         batch_acc, b_map['whiteblack'], b_map['purplepurple'], b_map['blackwhite'], b_map['purplewhite'],
                          time_to_str((timer() - start)/60)))
                 time.sleep(0.01)
 
@@ -414,8 +454,10 @@ def run_train():
 
             # print statistics  ------------
             # batch_acc = 0  #acc[0][0]
-            batch_acc = train_ap(net, truth_boxes, truth_labels,
-                                 truth_instances)
+            batch_acc, b_map = train_ap(net, truth_boxes, truth_labels,
+                                        truth_instances, metas)
+            # train_ap(net, truth_boxes, truth_labels, truth_instances, metas,
+            #  map_detail)
             batch_loss = np.array((
                 loss.cpu().data.numpy(),
                 net.rpn_cls_loss.cpu().data.numpy(),
@@ -425,20 +467,48 @@ def run_train():
                 net.mask_cls_loss.cpu().data.numpy(), ))
             sum_train_loss += batch_loss
             sum_train_acc += batch_acc
+            for im_type in sum_map_detail:
+                sum_map_detail[im_type].extend(b_map[im_type])
+                if b_map[im_type]:
+                    b_map[im_type] = np.array(b_map[im_type]).mean()
+                else:
+                    b_map[im_type] = 0.0
+            # sum_map_detail += b_map_detail
+            # print("Batch Loss Details: ", b_map_detail)
             sum += 1
             if i % iter_smooth == 0:
                 train_loss = sum_train_loss / sum
                 train_acc = sum_train_acc / sum
+                for im_type in sum_map_detail:
+                    if sum_map_detail[im_type]:
+                        t_map[im_type] = np.array(
+                            sum_map_detail[im_type]).mean()
+                    else:
+                        t_map[im_type] = 0.0
+                # t_map_detail = 
+                # print(sum_map_detail)
                 sum_train_loss = np.zeros(6, np.float32)
                 sum_train_acc = 0.
+                sum_map_detail = {
+                    'whiteblack': [],
+                    'purplepurple': [],
+                    'purplewhite': [],
+                    'blackwhite': []
+                }
                 sum = 0
 
 
-            print('\r%0.4f %5.1f k %6.1f %4.1f m | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  %0.3f | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  %0.3f | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  %0.3f | %s  %d,%d,%s' % (\
+            print('\r%0.4f %5.1f k %6.1f %4.1f m | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  | %0.4f   %0.4f %0.4f   %0.4f %0.4f  | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  | %0.4f   %0.4f %0.4f   %0.4f %0.4f  | %0.3f   %0.2f %0.2f   %0.2f %0.2f   %0.2f  | %0.4f   %0.4f %0.4f   %0.4f %0.4f  | %s  %d,%d,%s' % (\
                          rate, i/1000, epoch, num_products/1000000,
-                         valid_loss[0], valid_loss[1], valid_loss[2], valid_loss[3], valid_loss[4], valid_loss[5],valid_acc,
-                         train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_loss[4], train_loss[5],train_acc,
-                         batch_loss[0], batch_loss[1], batch_loss[2], batch_loss[3], batch_loss[4], batch_loss[5],batch_acc,
+                         valid_loss[0], valid_loss[1], valid_loss[2], valid_loss[3], valid_loss[4], valid_loss[5],#valid_acc,
+                         valid_acc, v_map['whiteblack'], v_map['purplepurple'], v_map['blackwhite'], v_map['purplewhite'],
+                         train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_loss[4], train_loss[5],#train_acc,
+                         train_acc, t_map['whiteblack'], t_map['purplepurple'], t_map['blackwhite'], t_map['purplewhite'],
+                         batch_loss[0], batch_loss[1], batch_loss[2], batch_loss[3], batch_loss[4], batch_loss[5],#batch_acc,
+                         batch_acc, b_map['whiteblack'], b_map['purplepurple'], b_map['blackwhite'], b_map['purplewhite'],
+                         # valid_loss[0], valid_loss[1], valid_loss[2], valid_loss[3], valid_loss[4], valid_loss[5],valid_acc,
+                         # train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_loss[4], train_loss[5],train_acc,
+                         # batch_loss[0], batch_loss[1], batch_loss[2], batch_loss[3], batch_loss[4], batch_loss[5],batch_acc,
                          time_to_str((timer() - start)/60) ,i,j, ''), end='',flush=True)#str(inputs.size()))
             j = j + 1
 
