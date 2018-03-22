@@ -30,6 +30,12 @@ class ScienceDataset(Dataset):
         #save
         self.ids = ids
 
+        # Classes Dataframe
+        # from IPython.core.debugger import set_trace; set_trace()
+        self.cl_df = pd.read_csv(DATA_DIR + '/classes.csv')
+        self.cl_df['im_type'] = self.cl_df.foreground.str.cat(
+            self.cl_df.background)
+
         #print
         print('\ttime = %0.2f min' % ((timer() - start) / 60))
         print('\tnum_ids = %d' % (len(self.ids)))
@@ -45,7 +51,11 @@ class ScienceDataset(Dataset):
         if self.mode in ['train']:
             multi_mask = np.load(DATA_DIR + '/image/%s/multi_masks/%s.npy' % (
                 folder, name)).astype(np.int32)
-            meta = '<not_used>'
+            # from IPython.core.debugger import set_trace; set_trace()
+            im_type = self.cl_df[self.cl_df['filename'] == name +
+                                 '.png']['im_type'].iloc[0]
+            # meta = '<not_used>'
+            meta = im_type
 
             if self.transform is not None:
                 return self.transform(image, multi_mask, meta, index)
@@ -72,8 +82,8 @@ class ScienceDataset(Dataset):
 def multi_mask_to_color_overlay(multi_mask, image=None, color=None):
 
     height, width = multi_mask.shape[:2]
-    overlay = np.zeros(
-        (height, width, 3), np.uint8) if image is None else image.copy()
+    overlay = np.zeros((height, width, 3),
+                       np.uint8) if image is None else image.copy()
     num_masks = int(multi_mask.max())
     if num_masks == 0: return overlay
 
@@ -102,8 +112,8 @@ def multi_mask_to_contour_overlay(multi_mask,
                                   color=[255, 255, 255]):
 
     height, width = multi_mask.shape[:2]
-    overlay = np.zeros(
-        (height, width, 3), np.uint8) if image is None else image.copy()
+    overlay = np.zeros((height, width, 3),
+                       np.uint8) if image is None else image.copy()
     num_masks = int(multi_mask.max())
     if num_masks == 0: return overlay
 
@@ -297,11 +307,12 @@ def run_check_dataset_reader():
     def submit_augment(image, index):
         pad_image = pad_to_factor(image, factor=16)
         # from IPython.core.debugger import set_trace; set_trace()
-        input = torch.from_numpy(pad_image.transpose((2, 0, 1))).float().div(255)
+        input = torch.from_numpy(
+            pad_image.transpose((2, 0, 1))).float().div(255)
         return input, image, index
 
     def train_augment(image, multi_mask, meta, index):
-
+        o_image = image
         image, multi_mask = random_shift_scale_rotate_transform2(
             image,
             multi_mask,
@@ -317,19 +328,22 @@ def run_check_dataset_reader():
         # cv2.waitKey(0)
 
         image, multi_mask = random_crop_transform2(
-            image, multi_mask, 64, 64, u=0.5)
-        image, multi_mask = random_horizontal_flip_transform2(image, multi_mask,
-                                                              0.5)
-        image, multi_mask = random_vertical_flip_transform2(image, multi_mask, 0.5)
+            image, multi_mask, 256, 256, u=0.5)
+        image, multi_mask = random_horizontal_flip_transform2(image,
+                                                              multi_mask, 0.5)
+        image, multi_mask = random_vertical_flip_transform2(image, multi_mask,
+                                                            0.5)
         image, multi_mask = random_rotate90_transform2(image, multi_mask, 0.5)
         ##image,  multi_mask = fix_crop_transform2(image, multi_mask, -1,-1,WIDTH, HEIGHT)
 
         #---------------------------------------
         input = torch.from_numpy(image.transpose((2, 0, 1))).float().div(255)
+        image = skimage.exposure.rescale_intensity(
+            image * 1.0, out_range=(0.0, 1.0))
+
         box, label, instance = multi_mask_to_annotation(multi_mask)
 
-        return input, image, multi_mask, box, label, instance, meta, index
-
+        return input, o_image, image, multi_mask, box, label, instance, meta, index
 
     def valid_augment(image, multi_mask, meta, index):
         o_image = image
@@ -337,18 +351,19 @@ def run_check_dataset_reader():
                                                 256)
 
         #---------------------------------------
+        image = skimage.exposure.rescale_intensity(
+            image * 1.0, out_range=(0.0, 1.0))
         input = torch.from_numpy(image.transpose((2, 0, 1))).float().div(255)
         box, label, instance = multi_mask_to_annotation(multi_mask)
 
         return input, o_image, image, multi_mask, box, label, instance, meta, index
 
-
-    # dataset = ScienceDataset(
-    #     'train1_ids_all_670',
-    #     mode='train',
-    #     #'disk0_ids_dummy_9', mode='train',
-    #     #'merge1_1', mode='train',
-    #     transform=train_augment, )
+    dataset = ScienceDataset(
+        'train1_ids_gray2_500',
+        mode='train',
+        #'disk0_ids_dummy_9', mode='train',
+        #'merge1_1', mode='train',
+        transform=train_augment, )
 
     valid_dataset = ScienceDataset(
         'valid1_ids_gray2_43',
@@ -359,7 +374,7 @@ def run_check_dataset_reader():
         #'merge1_1', mode='train',
         transform=valid_augment)
 
-    sampler = SequentialSampler(valid_dataset)
+    sampler = SequentialSampler(dataset)
     # sampler = RandomSampler(dataset)
 
     for n in iter(sampler):
@@ -371,42 +386,46 @@ def run_check_dataset_reader():
         # image_show('image', image)
         # cv2.waitKey()
 
-        input, image, n_image, multi_mask, box, label, instance, meta, index = valid_dataset[n]
+        input, image, n_image, multi_mask, box, label, instance, meta, index = dataset[
+            n]
+        n_image = (n_image*255).astype(np.uint8)
         print('n=%d------------------------------------------' % n)
         print('meta : ', meta)
         print('image_shape : ', image.shape)
         print('new_image_shape : ', n_image.shape)
-        from IPython.core.debugger import set_trace; set_trace()
+        from IPython.core.debugger import set_trace
+        set_trace()
 
-        # contour_overlay = multi_mask_to_contour_overlay(
-        #     multi_mask, image, color=[0, 0, 255])
-        # color_overlay = multi_mask_to_color_overlay(multi_mask)
-        # image_show('image', np.hstack([image, color_overlay, contour_overlay]))
+        contour_overlay = multi_mask_to_contour_overlay(
+            multi_mask, n_image, color=[0, 0, 255])
+        color_overlay = multi_mask_to_color_overlay(multi_mask)
+        image_show('image', np.hstack([n_image, color_overlay, contour_overlay]))
 
-        # num_masks = len(instance)
-        # for i in range(num_masks):
-        #     x0, y0, x1, y1 = box[i]
-        #     print('label[i], box[i] : ', label[i], box[i])
+        num_masks = len(instance)
+        for i in range(num_masks):
+            x0, y0, x1, y1 = box[i]
+            print('label[i], box[i] : ', label[i], box[i])
 
-        #     instance1 = cv2.cvtColor(
-        #         (instance[i] * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
-        #     image1 = image.copy()
-        #     color_overlay1 = color_overlay.copy()
-        #     contour_overlay1 = contour_overlay.copy()
+            instance1 = cv2.cvtColor(
+                (instance[i] * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
+            image1 = n_image.copy()
+            color_overlay1 = color_overlay.copy()
+            contour_overlay1 = contour_overlay.copy()
 
-        #     cv2.rectangle(instance1, (x0, y0), (x1, y1), (0, 255, 255), 2)
-        #     cv2.rectangle(image1, (x0, y0), (x1, y1), (0, 255, 255), 2)
-        #     cv2.rectangle(color_overlay1, (x0, y0), (x1, y1), (0, 255, 255), 2)
-        #     cv2.rectangle(contour_overlay1, (x0, y0), (x1, y1),
-        #                   (0, 255, 255), 2)
-        #     image_show(
-        #         'instance[i]',
-        #         np.hstack(
-        #             [instance1, image1, color_overlay1, contour_overlay1]))
-        #     cv2.waitKey()
+            cv2.rectangle(instance1, (x0, y0), (x1, y1), (0, 255, 255), 2)
+            cv2.rectangle(image1, (x0, y0), (x1, y1), (0, 255, 255), 2)
+            cv2.rectangle(color_overlay1, (x0, y0), (x1, y1), (0, 255, 255), 2)
+            cv2.rectangle(contour_overlay1, (x0, y0), (x1, y1),
+                          (0, 255, 255), 2)
+            image_show(
+                'instance[i]',
+                np.hstack(
+                    [instance1, image1, color_overlay1, contour_overlay1]))
+            cv2.waitKey()
+
+    # main #################################################################
 
 
-# main #################################################################
 if __name__ == '__main__':
     print('%s: calling main function ... ' % os.path.basename(__file__))
 
