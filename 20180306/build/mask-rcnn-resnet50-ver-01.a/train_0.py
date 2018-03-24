@@ -28,7 +28,6 @@ def train_augment(image, multi_mask, meta, index):
         rotate_limit=[-45, 45],
         borderMode=cv2.BORDER_REFLECT_101,
         u=0.5)  #borderMode=cv2.BORDER_CONSTANT
-
     # overlay = multi_mask_to_color_overlay(multi_mask,color='cool')
     # overlay1 = multi_mask_to_color_overlay(multi_mask1,color='cool')
     # image_show('overlay',overlay)
@@ -36,16 +35,19 @@ def train_augment(image, multi_mask, meta, index):
     # cv2.waitKey(0)
 
     image, multi_mask = random_crop_transform2(
-        image, multi_mask, WIDTH, HEIGHT, u=0.5)
-    image, multi_mask = random_horizontal_flip_transform2(image, multi_mask,
-                                                          0.5)
-    image, multi_mask = random_vertical_flip_transform2(image, multi_mask, 0.5)
+        image, multi_mask, 256, 256, u=0.5)
+    image, multi_mask = random_horizontal_flip_transform2(image,
+                                                          multi_mask, 0.5)
+    image, multi_mask = random_vertical_flip_transform2(image, multi_mask,
+                                                        0.5)
     image, multi_mask = random_rotate90_transform2(image, multi_mask, 0.5)
     ##image,  multi_mask = fix_crop_transform2(image, multi_mask, -1,-1,WIDTH, HEIGHT)
-
+    image = random_color_pertubation(image)
+    image = random_gaussian_blur(image)
+    image = random_poisson_noise(image)
     #---------------------------------------
-    # image = skimage.exposure.rescale_intensity(
-    #     image * 1.0, out_range=(0.0, 1.0))
+    mean_im = np.array([[[28.06749489, 26.2472168,  27.72432022]]])
+    image = image - mean_im
     input = torch.from_numpy(image.transpose((2, 0, 1))).float().div(255)
     box, label, instance = multi_mask_to_annotation(multi_mask)
     return input, box, label, instance, meta, index
@@ -53,15 +55,16 @@ def train_augment(image, multi_mask, meta, index):
 
 def valid_augment(image, multi_mask, meta, index):
 
-    image, multi_mask = fix_crop_transform2(image, multi_mask, -1, -1, WIDTH,
-                                            HEIGHT)
-
+    image, multi_mask = fix_crop_transform2(image, multi_mask, -1, -1, 256,
+                                            256)
+    # image = random_color_pertubation(image)
+    # image = random_gaussian_blur(image)
+    # image = random_poisson_noise(image)
     #---------------------------------------
-    # image = skimage.exposure.rescale_intensity(
-    #     image * 1.0, out_range=(0.0, 1.0))
+    mean_im = np.array([[[28.06749489, 26.2472168,  27.72432022]]])
+    image = image - mean_im
     input = torch.from_numpy(image.transpose((2, 0, 1))).float().div(255)
     box, label, instance = multi_mask_to_annotation(multi_mask)
-
     return input, box, label, instance, meta, index
 
 
@@ -176,7 +179,7 @@ def evaluate(net, test_loader):
 #--------------------------------------------------------------
 def run_train():
 
-    out_dir = RESULTS_DIR + '/mask-rcnn-50-gray500-02'
+    out_dir = RESULTS_DIR + '/mask-rcnn-50-gray500-03'
     # initial_checkpoint = \
     #     RESULTS_DIR + '/mask-rcnn-50-gray500-02/checkpoint/00014500_model.pth'
     initial_checkpoint = None
@@ -257,7 +260,7 @@ def run_train():
     log.write('** dataset setting **\n')
 
     train_dataset = ScienceDataset(
-        'train1_ids_gray2_500',
+        'algo_train1_ids_all_533',
         mode='train',
         #'debug1_ids_gray_only_10', mode='train',
         #'disk0_ids_dummy_9', mode='train', #12
@@ -275,7 +278,7 @@ def run_train():
         collate_fn=train_collate)
 
     valid_dataset = ScienceDataset(
-        'valid1_ids_gray2_43',
+        'algo_valid1_ids_all_134',
         mode='train',
         #'debug1_ids_gray_only_10', mode='train',
         #'disk0_ids_dummy_9', mode='train',

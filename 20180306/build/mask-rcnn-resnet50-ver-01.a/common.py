@@ -57,6 +57,7 @@ import skimage.color
 import skimage.io
 import skimage.morphology
 from scipy import ndimage
+from imgaug import augmenters as iaa
 
 
 #---------------------------------------------------------------------------------

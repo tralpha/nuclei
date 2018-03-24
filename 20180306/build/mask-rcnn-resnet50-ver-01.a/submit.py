@@ -135,9 +135,9 @@ def submit_collate(batch):
 #--------------------------------------------------------------
 def run_submit():
     from IPython.core.debugger import set_trace; set_trace()
-    out_dir = RESULTS_DIR + '/mask-rcnn-50-gray500-02'
+    out_dir = RESULTS_DIR + '/mask-rcnn-50-gray500-03'
     initial_checkpoint = \
-        RESULTS_DIR + '/mask-rcnn-50-gray500-02/checkpoint/00016500_model.pth'
+        RESULTS_DIR + '/mask-rcnn-50-gray500-03/checkpoint/00018000_model.pth'
     ##
 
     ## setup  ---------------------------
