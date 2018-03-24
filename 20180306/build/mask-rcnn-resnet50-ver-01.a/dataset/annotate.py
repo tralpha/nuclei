@@ -23,15 +23,15 @@ def run_make_test_annotation():
         ## save and show -------------------------------------------
         image_show('image', image)
 
-        cv2.imwrite(DATA_DIR + '/image/%s/images/%s.png' %
-                    (folder, name), image)
+        cv2.imwrite(DATA_DIR + '/image/%s/images/%s.png' % (folder, name),
+                    image)
         # set_trace()
         cv2.waitKey(1)
 
 
 def run_make_train_annotation():
 
-    split = 'train1_ids_all_670'
+    split = 'train1_ids_all_667'
     ids = read_list_from_file(DATA_DIR + '/split/' + split, comment='#')
 
     data_dir = DATA_DIR + '/image/stage1_train'
@@ -45,7 +45,8 @@ def run_make_train_annotation():
 
         name = id.split('/')[-1]
         folder = id.split('/')[0]
-        image_files = glob.glob(DATA_DIR + '/__download__/%s/%s/images/*.png' %(folder, name))
+        image_files = glob.glob(DATA_DIR + '/__download__/%s/%s/images/*.png' %
+                                (folder, name))
         assert (len(image_files) == 1)
         image_file = image_files[0]
         print(id)
@@ -58,13 +59,28 @@ def run_make_train_annotation():
         if C > 3: set_trace()
         multi_mask = np.zeros((H, W), np.int32)
 
-        mask_files = glob.glob(DATA_DIR + '/__download__/%s/%s/masks/*.png' % (
-            folder, name))
+        bad_masks = pd.read_csv(
+            DATA_DIR + "/__download__/bad_masks", sep='\\', header=None)
+        # set_trace()
+        bm_im_id = bad_masks[1].unique()
+        if name in bm_im_id:
+            mask_type = "masks_1"
+            print("Bad Masks for image {}".format(name))
+        else:
+            mask_type = "masks"
+
+        mask_files = glob.glob(DATA_DIR + '/__download__/%s/%s/%s/*.png' % (
+            folder, name, mask_type))
+        # if mask_type == "masks_1": set_trace()
         mask_files.sort()
         num_masks = len(mask_files)
         for i in range(num_masks):
             mask_file = mask_files[i]
             mask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE)
+            # Check for overlap here.
+            # set_trace()
+            if multi_mask[np.where(mask > 128)].astype(np.bool).any():
+                set_trace()
             multi_mask[np.where(mask > 128)] = i + 1
 
         #check
@@ -78,18 +94,19 @@ def run_make_train_annotation():
             contour_overlay,
             color1_overlay, )).astype(np.uint8)
 
-        # cv2.imwrite(data_dir +'/images/%s.png'%(name),image)
+        cv2.imwrite(data_dir +'/images/%s.png'%(name),image)
 
-        # np.save(data_dir + '/multi_masks/%s.npy' % name, multi_mask)
-        # cv2.imwrite(data_dir + '/multi_masks/%s.png' % name, color_overlay)
-        # cv2.imwrite(data_dir + '/overlays/%s.png' % name, all)
-        # cv2.imwrite(data_dir + '/images/%s.png' % name, image)
+        np.save(data_dir + '/multi_masks/%s.npy' % name, multi_mask)
+        cv2.imwrite(data_dir + '/multi_masks/%s.png' % name, color_overlay)
+        cv2.imwrite(data_dir + '/overlays/%s.png' % name, all)
+        cv2.imwrite(data_dir + '/images/%s.png' % name, image)
 
-        # image_show('all', all)
-        # cv2.waitKey(1)
+        image_show('all', all)
+        # if mask_type == "masks_1": cv2.waitKey()
+
+    # main #################################################################
 
 
-# main #################################################################
 if __name__ == '__main__':
     print('%s: calling main function ... ' % os.path.basename(__file__))
 
