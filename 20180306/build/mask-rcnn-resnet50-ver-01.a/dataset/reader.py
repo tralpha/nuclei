@@ -47,6 +47,8 @@ class ScienceDataset(Dataset):
         folder = id.split('/')[0]
         image = cv2.imread(DATA_DIR + '/image/%s/images/%s.png' %
                            (folder, name), cv2.IMREAD_COLOR)
+        # from IPython.core.debugger import set_trace
+        # set_trace()
 
         if self.mode in ['train']:
             multi_mask = np.load(DATA_DIR + '/image/%s/multi_masks/%s.npy' % (
@@ -56,6 +58,7 @@ class ScienceDataset(Dataset):
                                  '.png']['im_type'].iloc[0]
             # meta = '<not_used>'
             meta = im_type
+            # print(name)
 
             if self.transform is not None:
                 return self.transform(image, multi_mask, meta, index)
@@ -335,12 +338,19 @@ def run_check_dataset_reader():
                                                             0.5)
         image, multi_mask = random_rotate90_transform2(image, multi_mask, 0.5)
         ##image,  multi_mask = fix_crop_transform2(image, multi_mask, -1,-1,WIDTH, HEIGHT)
+        # image = random_hue_transform(image)
+        image = random_color_pertubation(image)
+        image = random_gaussian_blur(image)
+        image = random_poisson_noise(image)
 
+        # f_image = random_color_pertubation(image, u=1)
+        # f_image = random_gaussian_blur(image)
         #---------------------------------------
-        input = torch.from_numpy(image.transpose((2, 0, 1))).float().div(255)
-        image = skimage.exposure.rescale_intensity(
-            image * 1.0, out_range=(0.0, 1.0))
+        # mean_im = np.array([[[13.39989201, 13.39989201, 13.39989201]]])
+        # image = image - mean_im
+        # from IPython.core.debugger import set_trace; set_trace()
 
+        input = torch.from_numpy(image.transpose((2, 0, 1))).float().div(255)
         box, label, instance = multi_mask_to_annotation(multi_mask)
 
         return input, o_image, image, multi_mask, box, label, instance, meta, index
@@ -351,15 +361,22 @@ def run_check_dataset_reader():
                                                 256)
 
         #---------------------------------------
-        image = skimage.exposure.rescale_intensity(
-            image * 1.0, out_range=(0.0, 1.0))
-        input = torch.from_numpy(image.transpose((2, 0, 1))).float().div(255)
+        mean_im = np.array([[[28.06749489, 26.2472168,  27.72432022]]])
+        # image = image - mean_im
+
+        # image = skimage.exposure.rescale_intensity(
+        #     image * 1.0, out_range=(0.0, 1.0))
+        # mean_image = np.mean(image, axis=(0, 1)).reshape((1, 1, 3))
+        image = image - mean_im
+
+        input = torch.from_numpy(
+            image.transpose((2, 0, 1))).float().div(255)
         box, label, instance = multi_mask_to_annotation(multi_mask)
 
         return input, o_image, image, multi_mask, box, label, instance, meta, index
 
     dataset = ScienceDataset(
-        'train1_ids_gray2_500',
+        'train1_ids_blackwhite_16',
         mode='train',
         #'disk0_ids_dummy_9', mode='train',
         #'merge1_1', mode='train',
@@ -388,13 +405,13 @@ def run_check_dataset_reader():
 
         input, image, n_image, multi_mask, box, label, instance, meta, index = dataset[
             n]
-        n_image = (n_image*255).astype(np.uint8)
+        # plt.imshow(n_image); plt.show()
+        # new_image = (n_image*255).astype(np.uint8)
         print('n=%d------------------------------------------' % n)
         print('meta : ', meta)
         print('image_shape : ', image.shape)
         print('new_image_shape : ', n_image.shape)
-        from IPython.core.debugger import set_trace
-        set_trace()
+        # from IPython.core.debugger import set_trace; set_trace()
 
         contour_overlay = multi_mask_to_contour_overlay(
             multi_mask, n_image, color=[0, 0, 255])
@@ -424,6 +441,124 @@ def run_check_dataset_reader():
             cv2.waitKey()
 
     # main #################################################################
+
+
+    # Obtain the mean of the transformed images 
+def mean_transform():
+    def train_collate(batch):
+        batch_size = len(batch)
+        #for b in range(batch_size): print (batch[b][0].size())
+        # means = torch.stack([batch[b] for b in range(batch_size)], 0)
+        means = np.array([batch[b] for b in range(batch_size)])
+        # inputs = torch.stack([batch[b][0] for b in range(batch_size)], 0)
+        # boxes = [batch[b][1] for b in range(batch_size)]
+        # labels = [batch[b][2] for b in range(batch_size)]
+        # instances = [batch[b][3] for b in range(batch_size)]
+        # metas = [batch[b][4] for b in range(batch_size)]
+        # indices = [batch[b][5] for b in range(batch_size)]
+        return means
+
+    def train_augment(image, multi_mask, meta, index):
+        o_image = image
+        image, multi_mask = random_shift_scale_rotate_transform2(
+            image,
+            multi_mask,
+            shift_limit=[0, 0],
+            scale_limit=[1 / 2, 2],
+            rotate_limit=[-45, 45],
+            borderMode=cv2.BORDER_REFLECT_101,
+            u=0.5)  #borderMode=cv2.BORDER_CONSTANT
+        # overlay = multi_mask_to_color_overlay(multi_mask,color='cool')
+        # overlay1 = multi_mask_to_color_overlay(multi_mask1,color='cool')
+        # image_show('overlay',overlay)
+        # image_show('overlay1',overlay1)
+        # cv2.waitKey(0)
+
+        image, multi_mask = random_crop_transform2(
+            image, multi_mask, 256, 256, u=0.5)
+        image, multi_mask = random_horizontal_flip_transform2(image,
+                                                              multi_mask, 0.5)
+        image, multi_mask = random_vertical_flip_transform2(image, multi_mask,
+                                                            0.5)
+        image, multi_mask = random_rotate90_transform2(image, multi_mask, 0.5)
+        ##image,  multi_mask = fix_crop_transform2(image, multi_mask, -1,-1,WIDTH, HEIGHT)
+
+        image = random_color_pertubation(image)
+        image = random_gaussian_blur(image)
+        image = random_poisson_noise(image)
+        #---------------------------------------
+        mean_image = np.mean(image, axis=(0, 1)).reshape((1, 1, 3))
+        # image = image - mean_image
+        # input = torch.from_numpy(image.transpose((2, 0, 1))).float().div(255)
+        # box, label, instance = multi_mask_to_annotation(multi_mask)
+        return mean_image
+
+    def valid_augment(image, multi_mask, meta, index):
+        o_image = image
+        image, multi_mask = fix_crop_transform2(image, multi_mask, -1, -1, 256,
+                                                256)
+
+        #---------------------------------------
+        image = skimage.exposure.rescale_intensity(
+            image * 1.0, out_range=(0.0, 1.0))
+        mean_image = np.mean(image, axis=(0, 1)).reshape((1, 1, 3))
+        # image = image - mean_image
+
+        # input = torch.from_numpy(image.transpose((2, 0, 1))).float()#.div(255)
+        # box, label, instance = multi_mask_to_annotation(multi_mask)
+        return mean_image
+
+        # return input, o_image, image, multi_mask, box, label, instance, meta, index
+
+    dataset = ScienceDataset(
+        'train1_ids_all_667',
+        mode='train',
+        #'disk0_ids_dummy_9', mode='train',
+        #'merge1_1', mode='train',
+        transform=train_augment, )
+
+    valid_dataset = ScienceDataset(
+        'valid1_ids_gray2_43',
+        mode='train',
+        #'debug1_ids_gray_only_10', mode='train',
+        #'disk0_ids_dummy_9', mode='train',
+        #'train1_ids_purple_only1_101', mode='train', #12
+        #'merge1_1', mode='train',
+        transform=valid_augment)
+
+    batch_size = 100
+
+    train_loader = DataLoader(
+        dataset,
+        sampler=SequentialSampler(dataset),
+        batch_size=batch_size,
+        drop_last=True,
+        num_workers=0,
+        pin_memory=True,
+        collate_fn=train_collate)
+
+    sampler = SequentialSampler(dataset)
+
+    means = []
+    i = 0
+    while i < 50:
+        for im_means in train_loader:
+            # from IPython.core.debugger import set_trace; set_trace()
+            print(i)
+            means.append(im_means)
+
+    #         print(n * i + n)
+    #         im_mean = dataset[n]
+    #         means.append(im_mean)
+        i += 1
+    n_means = np.concatenate(means, axis=0)
+    f_means = n_means.mean(axis=0).reshape((1, 1, 3))
+    print(f_means)
+    # from IPython.core.debugger import set_trace
+    # set_trace()
+    # 
+
+    # input, image, n_image, multi_mask, box, label, instance, meta, index = dataset[
 
 
 if __name__ == '__main__':
