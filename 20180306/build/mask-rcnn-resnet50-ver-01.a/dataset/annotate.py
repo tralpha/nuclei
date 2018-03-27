@@ -79,8 +79,8 @@ def run_make_train_annotation():
             mask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE)
             # Check for overlap here.
             # set_trace()
-            if multi_mask[np.where(mask > 128)].astype(np.bool).any():
-                set_trace()
+            # if multi_mask[np.where(mask > 128)].astype(np.bool).any():
+            #     set_trace()
             multi_mask[np.where(mask > 128)] = i + 1
 
         #check
@@ -102,7 +102,7 @@ def run_make_train_annotation():
         cv2.imwrite(data_dir + '/images/%s.png' % name, image)
 
         image_show('all', all)
-        # if mask_type == "masks_1": cv2.waitKey()
+        if mask_type == "masks_1": cv2.waitKey()
 
     # main #################################################################
 

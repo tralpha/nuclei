@@ -36,18 +36,17 @@ def train_augment(image, multi_mask, meta, index):
 
     image, multi_mask = random_crop_transform2(
         image, multi_mask, 256, 256, u=0.5)
-    image, multi_mask = random_horizontal_flip_transform2(image,
-                                                          multi_mask, 0.5)
-    image, multi_mask = random_vertical_flip_transform2(image, multi_mask,
-                                                        0.5)
+    image, multi_mask = random_horizontal_flip_transform2(image, multi_mask,
+                                                          0.5)
+    image, multi_mask = random_vertical_flip_transform2(image, multi_mask, 0.5)
     image, multi_mask = random_rotate90_transform2(image, multi_mask, 0.5)
     ##image,  multi_mask = fix_crop_transform2(image, multi_mask, -1,-1,WIDTH, HEIGHT)
     image = random_color_pertubation(image)
     image = random_gaussian_blur(image)
     image = random_poisson_noise(image)
     #---------------------------------------
-    mean_im = np.array([[[28.06749489, 26.2472168,  27.72432022]]])
-    image = image - mean_im
+    # mean_im = np.array([[[28.06749489, 26.2472168,  27.72432022]]])
+    # image = image - mean_im
     input = torch.from_numpy(image.transpose((2, 0, 1))).float().div(255)
     box, label, instance = multi_mask_to_annotation(multi_mask)
     return input, box, label, instance, meta, index
@@ -61,8 +60,8 @@ def valid_augment(image, multi_mask, meta, index):
     # image = random_gaussian_blur(image)
     # image = random_poisson_noise(image)
     #---------------------------------------
-    mean_im = np.array([[[28.06749489, 26.2472168,  27.72432022]]])
-    image = image - mean_im
+    # mean_im = np.array([[[28.06749489, 26.2472168,  27.72432022]]])
+    # image = image - mean_im
     input = torch.from_numpy(image.transpose((2, 0, 1))).float().div(255)
     box, label, instance = multi_mask_to_annotation(multi_mask)
     return input, box, label, instance, meta, index
@@ -100,6 +99,8 @@ def train_ap(net,
     detections = net.detections.cpu().numpy()
     mask_precisions = []
     box_precisions = []
+    if len(detections) == 0:
+        return 0.0, map_detail
     for b in range(batch_size):
         truth_box = truth_boxes[b]
         if len(truth_box) == 0: continue
@@ -128,8 +129,86 @@ def train_ap(net,
     return np.array(mask_precisions).mean(), map_detail
 
 
+def debug_viz(net, inputs, truth_boxes, truth_labels, truth_instances,
+              mask_ap):
+    batch_size, C, H, W = inputs.size()
+    images = inputs.data.cpu().numpy()
+    window = net.rpn_window
+    rpn_logits_flat = net.rpn_logits_flat.data.cpu().numpy()
+    rpn_deltas_flat = net.rpn_deltas_flat.data.cpu().numpy()
+    rpn_proposals = net.first_rpn_proposals.data.cpu().numpy()
+
+    rcnn_logits = net.rcnn_logits.data.cpu().numpy()
+    rcnn_deltas = net.rcnn_deltas.data.cpu().numpy()
+    rcnn_proposals = net.rcnn_proposals.data.cpu().numpy()
+
+    detections = net.detections.data.cpu().numpy()
+    masks = net.masks
+    for b in range(batch_size):
+        image = (images[b].transpose((1, 2, 0)) * 255)
+        image = image.astype(np.uint8)
+
+        truth_box = truth_boxes[b]
+        truth_label = truth_labels[b]
+        truth_instance = truth_instances[b]
+        truth_mask = instance_to_multi_mask(truth_instance)
+
+        rpn_logit_flat = rpn_logits_flat[b]
+        rpn_delta_flat = rpn_deltas_flat[b]
+        rpn_prob_flat = np_softmax(rpn_logit_flat)
+
+        rpn_proposal = np.zeros((0, 7), np.float32)
+        if len(rpn_proposals) > 0:
+            index = np.where(rpn_proposals[:, 0] == b)[0]
+            rpn_proposal = rpn_proposals[index]
+
+        rcnn_proposal = np.zeros((0, 7), np.float32)
+        if len(rcnn_proposals) > 0:
+            index = np.where(rcnn_proposals[:, 0] == b)[0]
+            rcnn_logit = rcnn_logits[index]
+            rcnn_delta = rcnn_deltas[index]
+            rcnn_prob = np_softmax(rcnn_logit)
+            rcnn_proposal = rcnn_proposals[index]
+
+        mask = masks[b]
+
+        #box = proposal[:,1:5]
+        #mask = masks[b]
+
+        ## draw --------------------------------------------------------------------------
+        #contour_overlay = multi_mask_to_contour_overlay(truth_mask, image, [255,255,0] )
+        #color_overlay   = multi_mask_to_color_overlay(mask)
+
+        #all1 = draw_multi_rpn_prob(cfg, image, rpn_prob_flat)
+        #all2 = draw_multi_rpn_delta(cfg, overlay_contour, rpn_prob_flat, rpn_delta_flat, window,[0,0,255])
+        #all3 = draw_multi_rpn_proposal(cfg, image, proposal)
+        #all4 = draw_truth_box(cfg, image, truth_box, truth_label)
+
+        all5 = draw_multi_proposal_metric(
+            net.cfg, image, rpn_proposal, truth_box, truth_label,
+            [0, 255, 255], [255, 0, 255], [255, 255, 0])
+        # all5 = draw_multi_proposal_metric(
+        #     self.cfg, image, rpn_proposal, truth_box, truth_label,
+        #     [0, 255, 255], [255, 0, 255], [255, 255, 0])
+
+        all6 = draw_multi_proposal_metric(
+            net.cfg, image, rcnn_proposal, truth_box, truth_label,
+            [0, 255, 255], [255, 0, 255], [255, 255, 0])
+        all7 = draw_mask_metric(net.cfg, image, mask, truth_box, truth_label,
+                                truth_instance)
+
+        image_show('rpn_precision', all5, 1)
+        # image_show('rcnn_precision', all6, 1)
+        # image_show('mask_precision', all7, 1)
+
+        cv2.waitKey()
+
+        from IPython.core.debugger import set_trace
+        set_trace()
+
+
 ### training ##############################################################
-def evaluate(net, test_loader):
+def evaluate(net, test_loader, debug=False):
 
     test_num = 0
     test_loss = np.zeros(6, np.float32)
@@ -143,6 +222,7 @@ def evaluate(net, test_loader):
     for i, (inputs, truth_boxes, truth_labels, truth_instances, metas,
             indices) in enumerate(test_loader, 0):
 
+        net.set_mode('valid')
         with torch.no_grad():
             inputs = Variable(inputs)  #.cuda()
             net(inputs, truth_boxes, truth_labels, truth_instances)
@@ -151,10 +231,14 @@ def evaluate(net, test_loader):
         # acc    = dice_loss(masks, labels) #todo
 
         batch_size = len(indices)
-        mask_ap, map_detail = train_ap(net, truth_boxes, truth_labels,
-                                       truth_instances, metas, map_detail=map_detail)
+
+        # from IPython.core.debugger import set_trace; set_trace()
+        # if debug and (mask_ap < 0.4):
+        #     debug_viz(net, inputs, truth_boxes, truth_labels, truth_instances,
+        #               mask_ap)
+
         # mask_ap = 0
-        test_acc += batch_size*mask_ap
+        
         #batch_size*acc[0][0]
         # from IPython.core.debugger import set_trace; set_trace()
         test_loss += batch_size * np.array((
@@ -164,6 +248,20 @@ def evaluate(net, test_loader):
             net.rcnn_cls_loss.cpu().data.numpy(),
             net.rcnn_reg_loss.cpu().data.numpy(),
             net.mask_cls_loss.cpu().data.numpy(), ))
+
+        net.set_mode('test')
+        with torch.no_grad():
+            net(inputs, truth_boxes, truth_labels, truth_instances)
+
+        mask_ap, map_detail = train_ap(
+            net,
+            truth_boxes,
+            truth_labels,
+            truth_instances,
+            metas,
+            map_detail=map_detail)
+
+        test_acc += batch_size * mask_ap
         test_num += batch_size
     assert (test_num == len(test_loader.sampler))
     test_acc = test_acc / test_num
@@ -178,11 +276,14 @@ def evaluate(net, test_loader):
 
 #--------------------------------------------------------------
 def run_train():
-
-    out_dir = RESULTS_DIR + '/mask-rcnn-50-gray500-03'
+    # from IPython.core.debugger import set_trace; set_trace()
+    # out_dir = RESULTS_DIR + '/xmask-rcnn-50-01'
     # initial_checkpoint = \
-    #     RESULTS_DIR + '/mask-rcnn-50-gray500-02/checkpoint/00014500_model.pth'
-    initial_checkpoint = None
+    #     RESULTS_DIR + '/mask-rcnn-50-01/checkpoint/00002000_model.pth'
+    out_dir = '/Volumes/WININSTALL/' + 'xmask-rcnn-50-purplewhite-01'
+    initial_checkpoint = \
+        '/Volumes/WININSTALL/xmask-rcnn-50-purplewhite-01/checkpoint/00019000_model.pth'
+    # initial_checkpoint = None
     ##
 
     pretrain_file = \
@@ -208,7 +309,7 @@ def run_train():
     ## net ----------------------
     log.write('** net setting **\n')
     cfg = Configuration()
-    net = MaskRcnnNet(cfg).cuda()
+    net = MaskNet(cfg).cuda()
 
     if initial_checkpoint is not None:
         log.write('\tinitial_checkpoint = %s\n' % initial_checkpoint)
@@ -228,19 +329,19 @@ def run_train():
 
     ## optimiser ----------------------------------
     iter_accum = 1
-    batch_size = 6
+    batch_size = 4
 
     num_iters = 1000 * 1000
     iter_smooth = 20
     iter_log = 50
     iter_valid = 100
     iter_save   = [0, num_iters-1]\
-                   + list(range(0,num_iters,500))#1*1000
+                   + list(range(0,num_iters,1000))#1*1000
 
     LR = None  #LR = StepLR([ (0, 0.01),  (200, 0.001),  (300, -1)])
     optimizer = optim.SGD(
         filter(lambda p: p.requires_grad, net.parameters()),
-        lr=0.01 / iter_accum,
+        lr=0.001 / iter_accum,
         momentum=0.9,
         weight_decay=0.0001)
 
@@ -260,7 +361,7 @@ def run_train():
     log.write('** dataset setting **\n')
 
     train_dataset = ScienceDataset(
-        'algo_train1_ids_all_533',
+        'algo_train1_ids_purplewhite_29',
         mode='train',
         #'debug1_ids_gray_only_10', mode='train',
         #'disk0_ids_dummy_9', mode='train', #12
@@ -278,7 +379,7 @@ def run_train():
         collate_fn=train_collate)
 
     valid_dataset = ScienceDataset(
-        'algo_valid1_ids_all_134',
+        'algo_valid1_ids_purplewhite_8',
         mode='train',
         #'debug1_ids_gray_only_10', mode='train',
         #'disk0_ids_dummy_9', mode='train',
@@ -408,7 +509,8 @@ def run_train():
 
             if i % iter_valid == 0:
                 net.set_mode('valid')
-                valid_loss, valid_acc, v_map = evaluate(net, valid_loader)
+                valid_loss, valid_acc, v_map = evaluate(
+                    net, valid_loader, debug=False)
                 net.set_mode('train')
 
                 print('\r', end='', flush=True)

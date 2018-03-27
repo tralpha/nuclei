@@ -2,6 +2,8 @@ from common import *
 from net.lib.roi_align_pool_tf.module import RoIAlign as Crop
 
 
+# from net.lib.roi_align_pool_tf.module import RoIAlign as Crop
+
 if __name__ == '__main__':
     from configuration import *
     from layer.rpn_multi_nms     import *
@@ -13,7 +15,6 @@ if __name__ == '__main__':
     from layer.mask_nms    import *
     from layer.mask_target import *
     from layer.mask_loss   import *
-
 else:
     from .configuration import *
     from .layer.rpn_multi_nms     import *
@@ -28,8 +29,74 @@ else:
 
 
 
+## block ######################################################################################################
 
-#############  resent50 pyramid feature net ##############################################################################
+class ConvBn2d(nn.Module):
+
+    def merge_bn(self):
+        #raise NotImplementedError
+        assert(self.conv.bias==None)
+        conv_weight     = self.conv.weight.data
+        bn_weight       = self.bn.weight.data
+        bn_bias         = self.bn.bias.data
+        bn_running_mean = self.bn.running_mean
+        bn_running_var  = self.bn.running_var
+        bn_eps          = self.bn.eps
+
+        #https://github.com/sanghoon/pva-faster-rcnn/issues/5
+        #https://github.com/sanghoon/pva-faster-rcnn/commit/39570aab8c6513f0e76e5ab5dba8dfbf63e9c68c
+
+        N,C,KH,KW = conv_weight.size()
+        std = 1/(torch.sqrt(bn_running_var+bn_eps))
+        std_bn_weight =(std*bn_weight).repeat(C*KH*KW,1).t().contiguous().view(N,C,KH,KW )
+        conv_weight_hat = std_bn_weight*conv_weight
+        conv_bias_hat   = (bn_bias - bn_weight*std*bn_running_mean)
+
+        self.bn   = None
+        self.conv = nn.Conv2d(in_channels=self.conv.in_channels, out_channels=self.conv.out_channels, kernel_size=self.conv.kernel_size,
+                              padding=self.conv.padding, stride=self.conv.stride, dilation=self.conv.dilation, groups=self.conv.groups,
+                              bias=True)
+        self.conv.weight.data = conv_weight_hat #fill in
+        self.conv.bias.data   = conv_bias_hat
+
+
+
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, dilation=1, stride=1, groups=1, is_bn=True):
+        super(ConvBn2d, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=stride, dilation=dilation, groups=groups, bias=False)
+        self.bn   = nn.BatchNorm2d(out_channels, eps=1e-5)
+
+        if is_bn is False:
+            self.bn =None
+
+    def forward(self,x):
+        x = self.conv(x)
+        if self.bn is not None:
+            x = self.bn(x)
+        return x
+
+
+class SEScale(nn.Module):
+    def __init__(self, channel, reduction=16):
+        super(SEScale, self).__init__()
+        self.fc1 = nn.Conv2d(channel, reduction, kernel_size=1, padding=0)
+        self.fc2 = nn.Conv2d(reduction, channel, kernel_size=1, padding=0)
+
+    def forward(self, x):
+        x = F.adaptive_avg_pool2d(x,1)
+        x = self.fc1(x)
+        x = F.relu(x, inplace=True)
+        x = self.fc2(x)
+        x = F.sigmoid(x)
+        return x
+
+
+
+#############  resnext50 pyramid feature net ###################################################################
+# https://github.com/Hsuxu/ResNeXt/blob/master/models.py
+# https://github.com/D-X-Y/ResNeXt-DenseNet/blob/master/models/resnext.py
+# https://github.com/miraclewkf/ResNeXt-PyTorch/blob/master/resnext.py
+
 
 ## P layers ## ---------------------------
 class LateralBlock(nn.Module):
@@ -48,36 +115,35 @@ class LateralBlock(nn.Module):
         return p
 
 ## C layers ## ---------------------------
-class BottleneckBlock(nn.Module):
-    def __init__(self, in_planes, planes, out_planes, is_downsample=False, stride=1):
-        super(BottleneckBlock, self).__init__()
+
+# bottleneck type C
+class SENextBottleneckBlock(nn.Module):
+    def __init__(self, in_planes, planes, out_planes, groups, reduction=16, is_downsample=False, stride=1):
+        super(SENextBottleneckBlock, self).__init__()
         self.is_downsample = is_downsample
 
-        self.bn1   = nn.BatchNorm2d(in_planes,eps = 2e-5)
-        self.conv1 = nn.Conv2d(in_planes,     planes, kernel_size=1, padding=0, stride=1, bias=False)
-        self.bn2   = nn.BatchNorm2d(planes,eps = 2e-5)
-        self.conv2 = nn.Conv2d(   planes,     planes, kernel_size=3, padding=1, stride=stride, bias=False)
-        self.bn3   = nn.BatchNorm2d(planes,eps = 2e-5)
-        self.conv3 = nn.Conv2d(   planes, out_planes, kernel_size=1, padding=0, stride=1, bias=False)
+        self.conv_bn1 = ConvBn2d(in_planes,     planes, kernel_size=1, padding=0, stride=1)
+        self.conv_bn2 = ConvBn2d(   planes,     planes, kernel_size=3, padding=1, stride=stride, groups=groups)
+        self.conv_bn3 = ConvBn2d(   planes, out_planes, kernel_size=1, padding=0, stride=1)
+        self.scale    = SEScale(out_planes, reduction)
+
 
         if is_downsample:
-            self.downsample = nn.Conv2d(in_planes, out_planes, kernel_size=1, padding=0, stride=stride, bias=False)
+            self.downsample = ConvBn2d(in_planes, out_planes, kernel_size=1, padding=0, stride=stride)
 
 
     def forward(self, x):
 
-        x = F.relu(self.bn1(x),inplace=True)
-        z = self.conv1(x)
-        z = F.relu(self.bn2(z),inplace=True)
-        z = self.conv2(z)
-        z = F.relu(self.bn3(z),inplace=True)
-        z = self.conv3(z)
+        z = F.relu(self.conv_bn1(x),inplace=True)
+        z = F.relu(self.conv_bn2(z),inplace=True)
+        z =        self.conv_bn3(z)
 
         if self.is_downsample:
-            z += self.downsample(x)
+            z = self.scale(z)*z + self.downsample(x)
         else:
-            z += x
+            z = self.scale(z)*z + x
 
+        z = F.relu(z,inplace=True)
         return z
 
 
@@ -92,16 +158,16 @@ def make_layer_c0(in_planes, out_planes):
 
 
 
-def make_layer_c(in_planes, planes, out_planes, num_blocks, stride):
+def make_layer_c(in_planes, planes, out_planes, groups, num_blocks, stride):
     layers = []
-    layers.append(BottleneckBlock(in_planes, planes, out_planes, is_downsample=True, stride=stride))
+    layers.append(SENextBottleneckBlock(in_planes, planes, out_planes, groups, is_downsample=True, stride=stride))
     for i in range(1, num_blocks):
-        layers.append(BottleneckBlock(out_planes, planes, out_planes))
+        layers.append(SENextBottleneckBlock(out_planes, planes, out_planes, groups))
 
     return nn.Sequential(*layers)
 
 
-
+#resnext50_32x4d
 class FeatureNet(nn.Module):
 
     def __init__(self, cfg, in_channels, out_channels=256 ):
@@ -112,10 +178,10 @@ class FeatureNet(nn.Module):
         self.layer_c0 = make_layer_c0(in_channels, 64)
 
 
-        self.layer_c1 = make_layer_c(   64,  64,  256, num_blocks=3, stride=1)  #out =  64*4 =  256
-        self.layer_c2 = make_layer_c(  256, 128,  512, num_blocks=4, stride=2)  #out = 128*4 =  512
-        self.layer_c3 = make_layer_c(  512, 256, 1024, num_blocks=6, stride=2)  #out = 256*4 = 1024
-        self.layer_c4 = make_layer_c( 1024, 512, 2048, num_blocks=3, stride=2)  #out = 512*4 = 2048
+        self.layer_c1 = make_layer_c(   64,  64,  256, groups=32, num_blocks=3, stride=1)  #out =  64*4 =  256
+        self.layer_c2 = make_layer_c(  256, 128,  512, groups=32, num_blocks=4, stride=2)  #out = 128*4 =  512
+        self.layer_c3 = make_layer_c(  512, 256, 1024, groups=32, num_blocks=6, stride=2)  #out = 256*4 = 1024
+        self.layer_c4 = make_layer_c( 1024, 512, 2048, groups=32, num_blocks=3, stride=2)  #out = 512*4 = 2048
 
 
         # top-down
@@ -340,15 +406,15 @@ class MaskHead(nn.Module):
 ############# mask rcnn net ##############################################################################
 
 
-class MaskRcnnNet(nn.Module):
+class MaskNet(nn.Module):
 
     def __init__(self, cfg):
-        super(MaskRcnnNet, self).__init__()
-        self.version = 'net version \'mask-rcnn-resnet50-fpn\''
+        super(MaskNet, self).__init__()
+        self.version = 'net version \'mask-rcnn-se-resnext50-fpn\''
         self.cfg  = cfg
         self.mode = 'train'
 
-        feature_channels = 128
+        feature_channels = 256
         crop_channels = feature_channels
         self.feature_net = FeatureNet(cfg, 3, feature_channels)
         self.rpn_head    = RpnMultiHead(cfg,feature_channels)
@@ -369,6 +435,7 @@ class MaskRcnnNet(nn.Module):
         self.rpn_logits_flat, self.rpn_deltas_flat = data_parallel(self.rpn_head, features)
         self.rpn_window    = make_rpn_windows(cfg, features)
         self.rpn_proposals = rpn_nms(cfg, mode, inputs, self.rpn_window, self.rpn_logits_flat, self.rpn_deltas_flat)
+
         if mode in ['train', 'valid']:
             self.rpn_labels, self.rpn_label_assigns, self.rpn_label_weights, self.rpn_targets, self.rpn_target_weights = \
                 make_rpn_target(cfg, mode, inputs, self.rpn_window, truth_boxes, truth_labels )
@@ -394,14 +461,15 @@ class MaskRcnnNet(nn.Module):
         self.detections = self.rcnn_proposals
         self.masks      = make_empty_masks(cfg, mode, inputs)
 
-        if len(self.detections)>0:
+        if len(self.rcnn_proposals)>0:
               mask_crops = self.mask_crop(features, self.detections)
               self.mask_logits = data_parallel(self.mask_head, mask_crops)
-              self.masks = mask_nms(cfg, mode, inputs, self.detections, self.mask_logits) #<todo> better nms for mask
-
+              self.masks = mask_nms(cfg, mode, inputs, self.rcnn_proposals, self.mask_logits) #<todo> better nms for mask
+              # self.detections = self.mask_proposals
 
     def loss(self, inputs, truth_boxes, truth_labels, truth_instances):
         cfg  = self.cfg
+        # from IPython.core.debugger import set_trace; set_trace()
 
         self.rpn_cls_loss, self.rpn_reg_loss = \
            rpn_loss( self.rpn_logits_flat, self.rpn_deltas_flat, self.rpn_labels, self.rpn_label_weights, self.rpn_targets, self.rpn_target_weights)
